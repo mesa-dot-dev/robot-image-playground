@@ -232,8 +232,7 @@ The robot must look like it belongs in the same universe as the reference robots
             prompt: finalPrompt,
             n: 1,
             size: "1024x1024",
-            quality: "hd",
-            style: "natural"
+            quality: "high"
         });
 
         const imageUrl = response.data[0].url;
