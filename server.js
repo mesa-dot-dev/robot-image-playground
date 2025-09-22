@@ -190,6 +190,63 @@ app.post('/api/generate', async function(req, res) {
         }
 
         console.log(`Generating robot for: ${prompt}`);
+        
+        // First check if we already have this robot
+        const normalizedPrompt = prompt.toLowerCase().replace(/[^a-z0-9]/gi, '_');
+        
+        // Check in Generated folder
+        const generatedDir = path.join(__dirname, 'Generated');
+        const generatedFiles = await fs.readdir(generatedDir);
+        const existingGenerated = generatedFiles.find(file => {
+            const fileName = path.basename(file, path.extname(file)).toLowerCase();
+            // Check if filename starts with the normalized prompt (ignoring timestamp)
+            return fileName.startsWith(normalizedPrompt + '_') || fileName === normalizedPrompt;
+        });
+        
+        if (existingGenerated) {
+            console.log(`Found existing generated robot: ${existingGenerated}`);
+            res.json({
+                success: true,
+                filename: existingGenerated,
+                research: `Using existing generated robot for ${prompt}`,
+                cached: true
+            });
+            return;
+        }
+        
+        // Check in Reference Images folder
+        const referenceDir = path.join(__dirname, 'Reference Images');
+        const referenceFiles = await fs.readdir(referenceDir);
+        const existingReference = referenceFiles.find(file => {
+            const fileName = path.basename(file, path.extname(file)).toLowerCase();
+            const searchTerm = prompt.toLowerCase().replace(/\s+/g, '').replace(/[^a-z0-9]/gi, '');
+            const fileNameClean = fileName.replace(/[^a-z0-9]/gi, '').toLowerCase();
+            return fileNameClean === searchTerm || fileName === prompt.toLowerCase();
+        });
+        
+        if (existingReference) {
+            console.log(`Found existing reference robot: ${existingReference}`);
+            // Copy the reference image to Generated folder with timestamp
+            const sourceFile = path.join(referenceDir, existingReference);
+            const filename = `${normalizedPrompt}_${Date.now()}.png`;
+            const destFile = path.join(generatedDir, filename);
+            
+            // Read and copy the file
+            const imageBuffer = await fs.readFile(sourceFile);
+            await fs.writeFile(destFile, imageBuffer);
+            
+            res.json({
+                success: true,
+                filename: filename,
+                research: `Using existing reference robot for ${prompt}`,
+                cached: true,
+                source: 'reference'
+            });
+            return;
+        }
+        
+        // If no existing robot found, proceed with generation
+        console.log('No existing robot found, generating new one...');
 
         // Load and analyze reference images for style
         const referenceImages = await loadReferenceImages(10); // Get 10 random images
