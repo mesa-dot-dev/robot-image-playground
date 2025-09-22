@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Robot Image Generator</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+
+        .main-content {
+            padding: 40px;
+        }
+
+        .input-section {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 40px;
+        }
+
+        #promptInput {
+            flex: 1;
+            padding: 15px 20px;
+            font-size: 1.1em;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            transition: all 0.3s ease;
+        }
+
+        #promptInput:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        #promptInput:disabled {
+            background: #f5f5f5;
+            cursor: not-allowed;
+        }
+
+        #generateBtn {
+            padding: 15px 40px;
+            font-size: 1.1em;
+            font-weight: 600;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        #generateBtn:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+
+        #generateBtn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .current-image-section {
+            margin-bottom: 40px;
+            text-align: center;
+        }
+
+        .current-image-container {
+            display: inline-block;
+            position: relative;
+        }
+
+        .robot-image {
+            width: 300px;
+            height: 300px;
+            border-radius: 50%;
+            object-fit: cover;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            background: #f5f5f5;
+        }
+
+        .placeholder {
+            width: 300px;
+            height: 300px;
+            border-radius: 50%;
+            background: #f5f5f5;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #999;
+            font-size: 1.2em;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+        }
+
+        .spinner {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+
+        .spinner.active {
+            display: block;
+        }
+
+        .spinner-icon {
+            display: inline-block;
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .gallery-section {
+            margin-top: 40px;
+        }
+
+        .gallery-section h2 {
+            margin-bottom: 20px;
+            color: #333;
+        }
+
+        .gallery-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 20px;
+        }
+
+        .gallery-item {
+            text-align: center;
+        }
+
+        .gallery-image {
+            width: 100%;
+            aspect-ratio: 1;
+            border-radius: 50%;
+            object-fit: cover;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.15);
+            transition: transform 0.3s ease;
+        }
+
+        .gallery-image:hover {
+            transform: scale(1.05);
+        }
+
+        .gallery-label {
+            margin-top: 8px;
+            font-size: 0.9em;
+            color: #666;
+        }
+
+        .console-section {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 40px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            height: 200px;
+            overflow-y: auto;
+        }
+
+        .console-line {
+            margin-bottom: 5px;
+            line-height: 1.4;
+        }
+
+        .console-line.error {
+            color: #f48771;
+        }
+
+        .console-line.success {
+            color: #89d185;
+        }
+
+        .console-line.info {
+            color: #75beff;
+        }
+
+        .console-line.warning {
+            color: #ffcc00;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🤖 Robot Image Generator</h1>
+            <p>Generate unique robot avatars for programming languages and concepts</p>
+        </div>
+        
+        <div class="main-content">
+            <div class="input-section">
+                <input 
+                    type="text" 
+                    id="promptInput" 
+                    placeholder="Enter a programming language or concept (e.g., Python, Security, QA)"
+                    onfocus="this.select()"
+                >
+                <button id="generateBtn">Generate</button>
+            </div>
+            
+            <div class="spinner" id="spinner">
+                <div class="spinner-icon"></div>
+                <p>Generating your robot...</p>
+            </div>
+            
+            <div class="current-image-section">
+                <div class="current-image-container">
+                    <div id="currentImageContainer">
+                        <div class="placeholder">Your robot will appear here</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="gallery-section">
+                <h2>Generated Robots</h2>
+                <div class="gallery-grid" id="galleryGrid">
+                    <!-- Generated images will appear here -->
+                </div>
+            </div>
+            
+            <div class="console-section" id="console">
+                <div class="console-line info">🚀 Robot Image Generator initialized</div>
+                <div class="console-line info">📁 Reference images loaded</div>
+                <div class="console-line success">✅ Ready to generate robots!</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const promptInput = document.getElementById('promptInput');
+        const generateBtn = document.getElementById('generateBtn');
+        const spinner = document.getElementById('spinner');
+        const currentImageContainer = document.getElementById('currentImageContainer');
+        const galleryGrid = document.getElementById('galleryGrid');
+        const consoleEl = document.getElementById('console');
+
+        function addConsoleLog(message, type = 'info') {
+            const line = document.createElement('div');
+            line.className = `console-line ${type}`;
+            const timestamp = new Date().toLocaleTimeString();
+            line.textContent = `[${timestamp}] ${message}`;
+            consoleEl.appendChild(line);
+            consoleEl.scrollTop = consoleEl.scrollHeight;
+        }
+
+        async function loadGallery() {
+            try {
+                const response = await fetch('/api/gallery');
+                const images = await response.json();
+                
+                galleryGrid.innerHTML = '';
+                images.forEach(image => {
+                    const item = document.createElement('div');
+                    item.className = 'gallery-item';
+                    item.innerHTML = `
+                        <img src="/generated/${image.filename}" alt="${image.name}" class="gallery-image">
+                        <div class="gallery-label">${image.name}</div>
+                    `;
+                    galleryGrid.appendChild(item);
+                });
+                
+                if (images.length > 0) {
+                    addConsoleLog(`Loaded ${images.length} existing images from gallery`, 'info');
+                }
+            } catch (error) {
+                addConsoleLog('Failed to load gallery: ' + error.message, 'warning');
+            }
+        }
+
+        async function generateImage() {
+            const prompt = promptInput.value.trim();
+            if (!prompt) {
+                addConsoleLog('Please enter a prompt', 'warning');
+                return;
+            }
+
+            // Disable input and show spinner
+            promptInput.disabled = true;
+            generateBtn.disabled = true;
+            spinner.classList.add('active');
+            
+            addConsoleLog(`Starting generation for: "${prompt}"`, 'info');
+
+            try {
+                addConsoleLog('Researching concept and gathering references...', 'info');
+                
+                const response = await fetch('/api/generate', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ prompt })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Generation failed');
+                }
+
+                // Log research results if available
+                if (data.research) {
+                    addConsoleLog(`Research: ${data.research}`, 'info');
+                }
+
+                addConsoleLog('Image generated successfully!', 'success');
+                
+                // Display the new image
+                currentImageContainer.innerHTML = `
+                    <img src="/generated/${data.filename}" alt="${prompt}" class="robot-image">
+                `;
+
+                // Reload gallery
+                await loadGallery();
+                
+            } catch (error) {
+                addConsoleLog(`Error: ${error.message}`, 'error');
+                
+                // Show detailed error if available
+                if (error.details) {
+                    addConsoleLog(`Details: ${JSON.stringify(error.details)}`, 'error');
+                }
+            } finally {
+                // Re-enable input and hide spinner
+                promptInput.disabled = false;
+                generateBtn.disabled = false;
+                spinner.classList.remove('active');
+                promptInput.focus();
+            }
+        }
+
+        generateBtn.addEventListener('click', generateImage);
+        promptInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                generateImage();
+            }
+        });
+
+        // Load existing images on page load
+        window.addEventListener('load', loadGallery);
+    </script>
+</body>
+</html>
