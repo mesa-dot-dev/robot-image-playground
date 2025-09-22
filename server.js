@@ -248,8 +248,78 @@ app.post('/api/generate', async function(req, res) {
         // If no existing robot found, proceed with generation
         console.log('No existing robot found, generating new one...');
 
-        // Load and analyze reference images for style
-        const referenceImages = await loadReferenceImages(10); // Get 10 random images
+        // Look for related robots to use as primary references
+        const relatedRobots = [];
+        
+        // Extract potential robot names from the prompt (split by common delimiters)
+        const promptWords = prompt.toLowerCase().split(/[\s\-_,&+]/);
+        
+        // Check both Generated and Reference folders for related robots
+        const allExistingRobots = [];
+        
+        // Get all robots from Generated folder
+        for (const file of generatedFiles) {
+            if (file.endsWith('.png') || file.endsWith('.jpg') || file.endsWith('.jpeg')) {
+                allExistingRobots.push({
+                    name: path.basename(file, path.extname(file)).replace(/_\d+$/, ''), // Remove timestamp
+                    path: path.join(generatedDir, file),
+                    source: 'generated'
+                });
+            }
+        }
+        
+        // Get all robots from Reference Images folder
+        for (const file of referenceFiles) {
+            if (file.endsWith('.png') || file.endsWith('.jpg') || file.endsWith('.jpeg')) {
+                allExistingRobots.push({
+                    name: path.basename(file, path.extname(file)),
+                    path: path.join(referenceDir, file),
+                    source: 'reference'
+                });
+            }
+        }
+        
+        // Find matching robots based on prompt words
+        for (const robot of allExistingRobots) {
+            const robotNameClean = robot.name.toLowerCase().replace(/[^a-z0-9]/gi, '');
+            
+            // Check if any word in the prompt matches this robot
+            for (const word of promptWords) {
+                const wordClean = word.replace(/[^a-z0-9]/gi, '');
+                if (wordClean.length > 2 && (
+                    robotNameClean === wordClean || 
+                    robotNameClean.includes(wordClean) || 
+                    wordClean.includes(robotNameClean)
+                )) {
+                    // Found a related robot
+                    if (!relatedRobots.find(r => r.name === robot.name)) {
+                        relatedRobots.push(robot);
+                        console.log(`Found related robot: ${robot.name} from ${robot.source}`);
+                    }
+                    break;
+                }
+            }
+        }
+        
+        // Load reference images - prioritize related robots
+        let referenceImages = [];
+        
+        if (relatedRobots.length > 0) {
+            console.log(`Using ${relatedRobots.length} related robots as primary references`);
+            // Use related robots as primary references
+            referenceImages = relatedRobots.map(r => r.path);
+            
+            // If we have fewer than 10, add some random ones
+            if (referenceImages.length < 10) {
+                const additionalCount = 10 - referenceImages.length;
+                const randomRefs = await loadReferenceImages(additionalCount);
+                referenceImages = [...referenceImages, ...randomRefs];
+            }
+        } else {
+            // No related robots found, use random references
+            referenceImages = await loadReferenceImages(10);
+        }
+        
         const styleGuide = await analyzeReferenceStyle(referenceImages);
         
         // Research the specific concept
@@ -278,10 +348,14 @@ app.post('/api/generate', async function(req, res) {
         // If we had a mask, it would specify which parts of the image to modify
 
         // Construct the prompt combining style analysis and concept research
+        const relatedInfo = relatedRobots.length > 0 
+            ? `\nIMPORTANT: The reference images include robots for: ${relatedRobots.map(r => r.name).join(', ')}. The new robot should be in the same family/series as these, sharing similar design language while being unique.\n`
+            : '';
+            
         const finalPrompt = `Create a 3D rendered robot based on the reference images provided. The robot MUST match the exact 3D rendering style, materials, and quality of the reference robots - NOT a drawing or illustration.
 
 CRITICAL: This should be a photorealistic 3D render, exactly like the reference images.
-
+${relatedInfo}
 STYLE TO MAINTAIN (from reference analysis):
 ${styleGuide}
 
