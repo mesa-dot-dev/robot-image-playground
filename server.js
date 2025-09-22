@@ -32,16 +32,21 @@ async function ensureGeneratedDir() {
     }
 }
 
-// Load reference images
-async function loadReferenceImages() {
+// Load reference images - now with random selection
+async function loadReferenceImages(limit = 10) {
     const refDir = path.join(__dirname, 'Reference Images');
     try {
         const files = await fs.readdir(refDir);
         const imageFiles = files.filter(file => 
             /\.(png|jpg|jpeg)$/i.test(file)
         );
-        console.log(`Found ${imageFiles.length} reference images`);
-        return imageFiles.map(file => path.join(refDir, file));
+        
+        // Randomly select up to 'limit' images
+        const shuffled = imageFiles.sort(() => 0.5 - Math.random());
+        const selected = shuffled.slice(0, Math.min(limit, imageFiles.length));
+        
+        console.log(`Selected ${selected.length} random reference images from ${imageFiles.length} total`);
+        return selected.map(file => path.join(refDir, file));
     } catch (error) {
         console.error('Error loading reference images:', error);
         return [];
@@ -59,30 +64,85 @@ async function imageToBase64(imagePath) {
     }
 }
 
-// Optimized base prompt
-const BASE_PROMPT = `You are creating a robot avatar for programming languages and technical concepts.
+// Analyze reference images using GPT-4 Vision to extract style
+async function analyzeReferenceStyle(referenceImages) {
+    try {
+        console.log('Analyzing reference images for style...');
+        
+        // Convert images to base64
+        const imagePromises = referenceImages.slice(0, 5).map(async (imagePath) => {
+            const base64 = await imageToBase64(imagePath);
+            return base64;
+        });
+        
+        const base64Images = (await Promise.all(imagePromises)).filter(img => img !== null);
+        
+        if (base64Images.length === 0) {
+            console.log('No reference images could be loaded');
+            return getDefaultStyleDescription();
+        }
+        
+        // Create messages with images for GPT-4 Vision
+        const messages = [
+            {
+                role: "system",
+                content: "You are an expert art director analyzing robot designs to extract their visual style."
+            },
+            {
+                role: "user",
+                content: [
+                    {
+                        type: "text",
+                        text: `Analyze these robot images and provide a detailed style guide for creating similar robots. Focus on:
+                        1. Overall aesthetic (realistic, stylized, retro-futuristic, etc.)
+                        2. Material and texture details (metal type, wear patterns, surface finish)
+                        3. Color palette approach
+                        4. Head and body proportions
+                        5. Eye/face design patterns
+                        6. Level of detail and complexity
+                        7. Lighting and rendering style
+                        8. Any consistent design elements across the robots
+                        
+                        Provide a concise but detailed description that could be used to generate similar robots.`
+                    },
+                    ...base64Images.map(img => ({
+                        type: "image_url",
+                        image_url: {
+                            url: img,
+                            detail: "low"
+                        }
+                    }))
+                ]
+            }
+        ];
+        
+        const response = await openai.chat.completions.create({
+            model: "gpt-4o",
+            messages: messages,
+            max_tokens: 500
+        });
+        
+        const styleAnalysis = response.choices[0].message.content;
+        console.log('Style analysis completed');
+        return styleAnalysis;
+        
+    } catch (error) {
+        console.error('Error analyzing reference style:', error);
+        return getDefaultStyleDescription();
+    }
+}
 
-Style Guidelines:
-- Inspired by the reference robot images provided
-- Realistic 3D rendering
-- Slight grunge, lived in, and worn down look
-- White background for consistency
-- Robot facing slightly left (3/4 view)
-- Friendly and approachable design (think Wall-E, not Terminator)
-- Each robot must be visually distinct with unique:
-  * Color scheme that matches the language/concept's brand colors
-  * Head shape and design elements
-  * Body features and details
-  * Subtle thematic elements related to the concept
-- Must only have 1 robot, no other objects or characters on the image
-
-Technical Requirements:
-- Square aspect ratio (1:1)
-- High quality, detailed rendering
-- No text or labels on the robot
-- Professional profile picture quality
-
-The robot should embody the essence of the programming language or concept through its design, colors, and subtle visual metaphors.`;
+// Default style description if analysis fails
+function getDefaultStyleDescription() {
+    return `Create a robot in a retro-futuristic style with:
+    - Weathered, matte metal surfaces with visible wear and patina
+    - Rounded, friendly proportions similar to Wall-E
+    - Large expressive eyes with subtle glow
+    - Muted color palette with one accent color
+    - Visible mechanical details like joints, panels, and rivets
+    - Soft studio lighting on white background
+    - 3/4 view angle facing slightly left`;
+}
 
 // Research function using GPT-4 with web search
 async function researchConcept(concept) {
@@ -131,34 +191,44 @@ app.post('/api/generate', async function(req, res) {
 
         console.log(`Generating robot for: ${prompt}`);
 
-        // Research the concept
+        // Load and analyze reference images for style
+        const referenceImages = await loadReferenceImages(10); // Get 10 random images
+        const styleGuide = await analyzeReferenceStyle(referenceImages);
+        
+        // Research the specific concept
         const research = await researchConcept(prompt);
 
-        // Load reference images
-        const referenceImages = await loadReferenceImages();
-        const referenceBase64 = [];
-        
-        // Convert first 3 reference images to base64 (to avoid token limits)
-        for (let i = 0; i < Math.min(3, referenceImages.length); i++) {
-            const base64 = await imageToBase64(referenceImages[i]);
-            if (base64) {
-                referenceBase64.push(base64);
-            }
-        }
+        // Construct a detailed prompt combining style analysis and concept research
+        const finalPrompt = `Create a robot avatar following this exact style guide:
 
-        // Construct the final prompt
-        const finalPrompt = `${BASE_PROMPT}
+${styleGuide}
 
-Research findings for ${prompt}:
+IMPORTANT STYLE REQUIREMENTS:
+- Match the exact aesthetic of the reference robots
+- Use similar material textures and wear patterns
+- Maintain consistent proportions and design language
+- White or light background
+- Robot facing slightly left (3/4 view)
+- Single robot only, no additional objects
+- Square image composition
+- No text or labels
+
+CONCEPT DETAILS for "${prompt}":
 ${research}
 
-Now create a unique robot avatar that represents "${prompt}" based on the research above and the reference style images provided.`;
+Combine the style guide above with the concept research to create a robot that:
+1. Perfectly matches the visual style of the reference robots
+2. Incorporates the brand colors and personality of ${prompt}
+3. Uses subtle visual metaphors related to ${prompt}
+4. Maintains the friendly, approachable character
 
-        console.log('Calling OpenAI Image Generation API...');
+The robot must look like it belongs in the same universe as the reference robots while uniquely representing ${prompt}.`;
 
-        // Generate image using DALL-E 3
+        console.log('Calling OpenAI Image Generation API with gpt-image-1...');
+
+        // Generate image using gpt-image-1 (latest model with reference image support)
         const response = await openai.images.generate({
-            model: "dall-e-3",
+            model: "gpt-image-1",
             prompt: finalPrompt,
             n: 1,
             size: "1024x1024",
