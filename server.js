@@ -198,61 +198,112 @@ app.post('/api/generate', async function(req, res) {
         // Research the specific concept
         const research = await researchConcept(prompt);
 
-        // Construct a detailed prompt combining style analysis and concept research
-        const finalPrompt = `Create a robot avatar following this exact style guide:
+        // For gpt-image-1, we need to use a base image and can provide additional reference context
+        // Create a resized version of the reference image
+        const tempImagePath = path.join(__dirname, 'temp_reference.jpg');
+        try {
+            const imagePath = referenceImages[0];
+            // Resize image to be small enough for the API (under 16KB limit)
+            await sharp(imagePath)
+                .resize(128, 128, { fit: 'cover' })
+                .jpeg({ quality: 50 })  // JPEG is more compressed than PNG
+                .toFile(tempImagePath);
+            console.log(`Using base image: ${path.basename(imagePath)} (resized to fit API limits)`);
+        } catch (err) {
+            throw new Error(`Failed to load/resize base reference image: ${err}`);
+        }
 
+        // Create a mask (optional - for now we'll generate without mask)
+        // If we had a mask, it would specify which parts of the image to modify
+
+        // Construct the prompt combining style analysis and concept research
+        const finalPrompt = `Make a robot that maintains the style, materials, and aesthetic of the reference robot for the following concept: ${prompt}
+
+STYLE TO MAINTAIN (from reference analysis):
 ${styleGuide}
 
-IMPORTANT STYLE REQUIREMENTS:
-- Match the exact aesthetic of the reference robots
-- Use similar material textures and wear patterns
-- Maintain consistent proportions and design language
+REQUIREMENTS:
+- Keep the same material textures, wear patterns, and weathering
+- Maintain similar proportions and mechanical details  
+- Use the same rendering style and lighting
 - White or light background
 - Robot facing slightly left (3/4 view)
 - Single robot only, no additional objects
 - Square image composition
 - No text or labels
 
-CONCEPT DETAILS for "${prompt}":
+${prompt.toUpperCase()} SPECIFIC CHANGES:
 ${research}
 
-Combine the style guide above with the concept research to create a robot that:
-1. Perfectly matches the visual style of the reference robots
-2. Incorporates the brand colors and personality of ${prompt}
-3. Uses subtle visual metaphors related to ${prompt}
-4. Maintains the friendly, approachable character
+Incorporate ${prompt}'s brand colors and personality while keeping the overall robot style identical to the reference. The robot should look like it's from the same series/universe.`;
 
-The robot must look like it belongs in the same universe as the reference robots while uniquely representing ${prompt}.`;
+        console.log('Using Responses API with gpt-image-1');
+        console.log('Calling OpenAI Responses API with image generation tool...');
 
-        console.log('Calling OpenAI Image Generation API with gpt-image-1...');
-
-        // Generate image using gpt-image-1 (latest model with reference image support)
-        const response = await openai.images.generate({
-            model: "gpt-image-1",
-            prompt: finalPrompt,
-            n: 1,
-            size: "1024x1024",
-            quality: "high"
-        });
-
-        const imageUrl = response.data[0].url;
-        
-        if (!imageUrl) {
-            throw new Error('No image URL returned from OpenAI');
+        let response;
+        try {
+            // Read the resized image as base64
+            const imageBuffer = await fs.readFile(tempImagePath);
+            const imageBase64 = imageBuffer.toString('base64');
+            
+            // Use the Responses API with gpt-image-1
+            response = await openai.responses.create({
+                model: "gpt-4o", // Using a model that supports the image generation tool
+                input: [
+                    {
+                        role: "user",
+                        content: [
+                            {
+                                type: "input_text",
+                                text: finalPrompt
+                            },
+                            {
+                                type: "input_image",
+                                image_url: `data:image/jpeg;base64,${imageBase64}`
+                            }
+                        ]
+                    }
+                ],
+                tools: [
+                    {
+                        type: "image_generation",
+                        quality: "high",
+                        size: "1024x1024",
+                        input_fidelity: "high" // Preserve details from reference image
+                    }
+                ]
+            });
+        } catch (error) {
+            console.error('API call error:', error.response?.data || error);
+            throw error;
+        } finally {
+            // Always clean up temp file
+            await fs.unlink(tempImagePath).catch(() => {});
         }
+
+        // Extract image data from Responses API response
+        const imageGenerationCalls = response.output?.filter(
+            output => output.type === 'image_generation_call'
+        ) || [];
+        
+        if (imageGenerationCalls.length === 0 || !imageGenerationCalls[0].result) {
+            console.log('API Response structure:', JSON.stringify(response, null, 2).substring(0, 500));
+            throw new Error('No image data returned from OpenAI Responses API');
+        }
+        
+        // The result is base64 encoded image data
+        const imageBase64Result = imageGenerationCalls[0].result;
 
         console.log('Image generated successfully');
 
-        // Download the image
-        const imageResponse = await axios.get(imageUrl, {
-            responseType: 'arraybuffer'
-        });
+        // Convert base64 to buffer
+        const imageBuffer = Buffer.from(imageBase64Result, 'base64');
         
         // Save the image
         const filename = `${prompt.replace(/[^a-z0-9]/gi, '_')}_${Date.now()}.png`;
         const filepath = path.join(__dirname, 'Generated', filename);
         
-        await fs.writeFile(filepath, imageResponse.data);
+        await fs.writeFile(filepath, imageBuffer);
         console.log(`Image saved as: ${filename}`);
 
         res.json({
