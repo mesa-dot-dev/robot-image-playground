@@ -138,7 +138,7 @@ function getDefaultStyleDescription() {
     - Weathered, matte metal surfaces with visible wear and patina
     - Rounded, friendly proportions similar to Wall-E
     - Large expressive eyes with subtle glow
-    - Muted color palette with one accent color
+    - Muted color palette
     - Visible mechanical details like joints, panels, and rivets
     - Soft studio lighting on white background
     - 3/4 view angle facing slightly left`;
@@ -198,53 +198,73 @@ app.post('/api/generate', async function(req, res) {
         // Research the specific concept
         const research = await researchConcept(prompt);
 
-        // For gpt-image-1, we need to use a base image and can provide additional reference context
-        // Create a resized version of the reference image
-        const tempImagePath = path.join(__dirname, 'temp_reference.jpg');
-        try {
-            const imagePath = referenceImages[0];
-            // Resize image to be small enough for the API (under 16KB limit)
-            await sharp(imagePath)
-                .resize(128, 128, { fit: 'cover' })
-                .jpeg({ quality: 50 })  // JPEG is more compressed than PNG
-                .toFile(tempImagePath);
-            console.log(`Using base image: ${path.basename(imagePath)} (resized to fit API limits)`);
-        } catch (err) {
-            throw new Error(`Failed to load/resize base reference image: ${err}`);
+        // Process all reference images with better quality
+        const referenceBase64Images = [];
+        console.log(`Processing ${referenceImages.length} reference images...`);
+        
+        for (let i = 0; i < referenceImages.length; i++) {
+            const imagePath = referenceImages[i];
+            try {
+                // Resize to maintain quality while being reasonable size
+                const buffer = await sharp(imagePath)
+                    .resize(512, 512, { fit: 'inside', withoutEnlargement: true })
+                    .jpeg({ quality: 85 })
+                    .toBuffer();
+                referenceBase64Images.push(buffer.toString('base64'));
+                console.log(`Processed reference ${i + 1}: ${path.basename(imagePath)}`);
+            } catch (err) {
+                console.warn(`Failed to process reference image ${imagePath}: ${err}`);
+            }
         }
 
         // Create a mask (optional - for now we'll generate without mask)
         // If we had a mask, it would specify which parts of the image to modify
 
         // Construct the prompt combining style analysis and concept research
-        const finalPrompt = `Make a robot that maintains the style, materials, and aesthetic of the reference robot for the following concept: ${prompt}
+        const finalPrompt = `Create a 3D rendered robot based on the reference images provided. The robot MUST match the exact 3D rendering style, materials, and quality of the reference robots - NOT a drawing or illustration.
+
+CRITICAL: This should be a photorealistic 3D render, exactly like the reference images.
 
 STYLE TO MAINTAIN (from reference analysis):
 ${styleGuide}
 
 REQUIREMENTS:
-- Keep the same material textures, wear patterns, and weathering
+- MUST be a 3D render, NOT a drawing or illustration
+- Keep the EXACT same 3D rendering quality and style as references
+- Same material textures (metal, plastic, etc) as reference robots
 - Maintain similar proportions and mechanical details  
-- Use the same rendering style and lighting
-- White or light background
+- Use the same photorealistic lighting and shading
+- White background
 - Robot facing slightly left (3/4 view)
 - Single robot only, no additional objects
 - Square image composition
 - No text or labels
 
-${prompt.toUpperCase()} SPECIFIC CHANGES:
+${prompt.toUpperCase()} SPECIFIC CUSTOMIZATION:
 ${research}
 
-Incorporate ${prompt}'s brand colors and personality while keeping the overall robot style identical to the reference. The robot should look like it's from the same series/universe.`;
+Make this robot embody ${prompt} through colors and subtle design elements, but it MUST look like it belongs in the same 3D rendered robot series as the reference images, while still being unique in their shapes, colors and concepts.`;
 
         console.log('Using Responses API with gpt-image-1');
         console.log('Calling OpenAI Responses API with image generation tool...');
 
         let response;
         try {
-            // Read the resized image as base64
-            const imageBuffer = await fs.readFile(tempImagePath);
-            const imageBase64 = imageBuffer.toString('base64');
+            // Build content array with text prompt and all reference images
+            const contentArray = [
+                {
+                    type: "input_text",
+                    text: finalPrompt
+                }
+            ];
+            
+            // Add all reference images
+            for (const base64Image of referenceBase64Images) {
+                contentArray.push({
+                    type: "input_image",
+                    image_url: `data:image/jpeg;base64,${base64Image}`
+                });
+            }
             
             // Use the Responses API with gpt-image-1
             response = await openai.responses.create({
@@ -252,16 +272,7 @@ Incorporate ${prompt}'s brand colors and personality while keeping the overall r
                 input: [
                     {
                         role: "user",
-                        content: [
-                            {
-                                type: "input_text",
-                                text: finalPrompt
-                            },
-                            {
-                                type: "input_image",
-                                image_url: `data:image/jpeg;base64,${imageBase64}`
-                            }
-                        ]
+                        content: contentArray
                     }
                 ],
                 tools: [
@@ -269,16 +280,13 @@ Incorporate ${prompt}'s brand colors and personality while keeping the overall r
                         type: "image_generation",
                         quality: "high",
                         size: "1024x1024",
-                        input_fidelity: "high" // Preserve details from reference image
+                        input_fidelity: "high" // Preserve details from reference images
                     }
                 ]
             });
         } catch (error) {
             console.error('API call error:', error.response?.data || error);
             throw error;
-        } finally {
-            // Always clean up temp file
-            await fs.unlink(tempImagePath).catch(() => {});
         }
 
         // Extract image data from Responses API response
