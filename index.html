@@ -471,13 +471,13 @@
                     if (openaiCost > 0 || googleCost > 0) {
                         addConsoleLog(`Total cost for both models: ${totalCost}`, 'success');
                     }
+                } else if (data.cached) {
+                    addConsoleLog(`Using cached image (no API cost)`, 'info');
                 } else if (data.tokenUsage) {
                     const totalTokens = data.tokenUsage.total_tokens + (data.tokenUsage.image_tokens || 4160);
                     addConsoleLog(`Token usage: ${totalTokens} tokens`, 'info');
                     addConsoleLog(`Estimated cost: ${data.cost}`, 'success');
                     updateCostSummary(data.cost, selectedModel);
-                } else if (data.cached) {
-                    addConsoleLog(`Using cached image (no API cost)`, 'info');
                 }
                 
                 // Calculate and display generation time
