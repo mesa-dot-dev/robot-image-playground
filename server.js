@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 const express = require('express');
 const multer = require('multer');
 const path = require('path');
@@ -13,11 +15,11 @@ const PORT = 3000;
 
 // Initialize OpenAI client
 const openai = new OpenAI({
-    apiKey: 'process.env.OPENAI_API_KEY'
+    apiKey: process.env.OPENAI_API_KEY
 });
 
 // Initialize Google Gemini client
-const googleAI = new GoogleGenerativeAI('process.env.GOOGLE_API_KEY');
+const googleAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
 
 // Middleware
 app.use(express.json());
@@ -255,11 +257,18 @@ async function researchConcept(concept, model = 'openai') {
 
 // Build the generation prompt (shared between models)
 async function buildGenerationPrompt(prompt, referenceImages, relatedRobots, extensiveThinking = true) {
+        const thinkingStartTime = Date.now();
+        
         // Check if this is a unique/non-standard concept (not a known programming language or tech)
         const isUniqueConcept = relatedRobots.length === 0;
         
         const styleGuide = extensiveThinking ? await analyzeReferenceStyle(referenceImages, 'openai', isUniqueConcept) : getDefaultStyleDescription();
         const research = extensiveThinking ? await researchConcept(prompt) : `Creating a robot for ${prompt}`;
+        
+        const thinkingTime = Date.now() - thinkingStartTime;
+        if (extensiveThinking) {
+            console.log(`Thinking/Research completed in ${(thinkingTime / 1000).toFixed(1)}s`);
+        }
         
         // For unique concepts, we need to ensure the robot is distinctly different
         const uniquenessInstruction = isUniqueConcept 
@@ -320,14 +329,14 @@ ${isUniqueConcept
 
 REMINDER: NO TEXT ON THE ROBOT - Do not write "${prompt}" or any text on the robot. Express the concept through design, colors, and form only.`;
 
-    return { finalPrompt, research, styleGuide };
+    return { finalPrompt, research, styleGuide, thinkingTime };
 }
 
 // Generate image using Google Gemini
 async function generateWithGoogle(prompt, referenceImages, relatedRobots, extensiveThinking = true) {
     console.log('Using Google Gemini 2.5 Flash Image (Nano Banana) for generation');
     
-    const { finalPrompt, research } = await buildGenerationPrompt(prompt, referenceImages, relatedRobots, extensiveThinking);
+    const { finalPrompt, research, thinkingTime } = await buildGenerationPrompt(prompt, referenceImages, relatedRobots, extensiveThinking);
     
     // Process reference images for Google
     const referenceBase64Images = [];
@@ -409,7 +418,7 @@ async function generateWithGoogle(prompt, referenceImages, relatedRobots, extens
 async function generateWithOpenAI(prompt, referenceImages, relatedRobots, extensiveThinking = true) {
     console.log('Using OpenAI GPT-4o with image generation tool');
     
-    const { finalPrompt, research } = await buildGenerationPrompt(prompt, referenceImages, relatedRobots, extensiveThinking);
+    const { finalPrompt, research, thinkingTime } = await buildGenerationPrompt(prompt, referenceImages, relatedRobots, extensiveThinking);
     
     // Process reference images for OpenAI
     const referenceBase64Images = [];
@@ -847,6 +856,14 @@ app.post('/api/generate', async function(req, res) {
         // If no existing robot found, proceed with generation
         console.log('No existing robot found, generating new one...');
         
+        // Track timing
+        const overallStartTime = Date.now();
+        let thinkingTime = 0;
+        let generationTime = 0;
+        
+        // Start thinking phase timing
+        const thinkingStartTime = Date.now();
+        
         // Find related robots and load reference images
         const relatedRobots = await findRelatedRobots(prompt);
         
@@ -859,6 +876,10 @@ app.post('/api/generate', async function(req, res) {
             console.log('Loading random reference images for STYLE ONLY (not design copying)');
             referenceImages = await loadReferenceImages(10);
         }
+        
+        // End thinking phase timing (if extensive thinking is enabled)
+        thinkingTime = Date.now() - thinkingStartTime;
+        const generationStartTime = Date.now();
         
         // Generate image based on selected model
         let result;
@@ -874,13 +895,27 @@ app.post('/api/generate', async function(req, res) {
         
         await fs.writeFile(filepath, result.imageBuffer);
         console.log(`Image saved as: ${filename}`);
+        
+        // Calculate generation time
+        generationTime = Date.now() - generationStartTime;
+        
+        // Add thinking time from buildGenerationPrompt if available
+        if (result.thinkingTime) {
+            thinkingTime += result.thinkingTime;
+            generationTime -= result.thinkingTime; // Subtract thinking time from generation time
+        }
 
         res.json({
             success: true,
             filename: filename,
             research: result.research,
             tokenUsage: result.tokenUsage,
-            cost: result.cost
+            cost: result.cost,
+            timings: {
+                thinkingTime: extensiveThinking ? thinkingTime : 0,
+                generationTime: generationTime,
+                totalTime: Date.now() - overallStartTime
+            }
         });
 
     } catch (error) {

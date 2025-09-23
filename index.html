@@ -419,9 +419,25 @@
                     throw new Error(data.error || 'Generation failed');
                 }
 
-                // Log research results if available
+                // Log research results and timing if available
                 if (data.research) {
                     addConsoleLog(`Research: ${data.research}`, 'info');
+                }
+                
+                // Log timing breakdown if available
+                if (data.timings) {
+                    if (data.timings.thinkingTime) {
+                        const thinkingMinutes = Math.floor(data.timings.thinkingTime / 60000);
+                        const thinkingSeconds = ((data.timings.thinkingTime % 60000) / 1000).toFixed(1);
+                        const thinkingTimeStr = thinkingMinutes > 0 ? `${thinkingMinutes}m ${thinkingSeconds}s` : `${thinkingSeconds}s`;
+                        addConsoleLog(`Thinking/Research time: ${thinkingTimeStr}`, 'info');
+                    }
+                    if (data.timings.generationTime) {
+                        const genMinutes = Math.floor(data.timings.generationTime / 60000);
+                        const genSeconds = ((data.timings.generationTime % 60000) / 1000).toFixed(1);
+                        const genTimeStr = genMinutes > 0 ? `${genMinutes}m ${genSeconds}s` : `${genSeconds}s`;
+                        addConsoleLog(`Image generation time: ${genTimeStr}`, 'info');
+                    }
                 }
 
                 // Log cost information if available
