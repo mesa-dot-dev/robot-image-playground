@@ -279,54 +279,61 @@ app.post('/api/generate', async function(req, res) {
             }
         }
         
-        // Find matching robots based on prompt words - prioritize exact base matches
-        const foundBaseRobots = new Set();
+        // Hierarchical search for related robots
+        // 1. First try to find the most specific match (full prompt)
+        // 2. Then try progressively less specific matches
+        // 3. Finally fall back to individual word matches
         
-        for (const word of promptWords) {
-            const wordClean = word.replace(/[^a-z0-9]/gi, '').toLowerCase();
-            if (wordClean.length < 2) continue;
+        const promptClean = prompt.toLowerCase().replace(/[^a-z0-9]/gi, '');
+        let foundSpecificMatch = false;
+        
+        // Level 1: Try exact match of full prompt (e.g., "Python Optimizer 2.0" -> "pythonoptimizer20")
+        for (const robot of allExistingRobots) {
+            const robotNameClean = robot.name.toLowerCase().replace(/[^a-z0-9]/gi, '');
+            if (robotNameClean === promptClean) {
+                relatedRobots.push(robot);
+                console.log(`Found EXACT match robot: ${robot.name} from ${robot.source}`);
+                foundSpecificMatch = true;
+                break;
+            }
+        }
+        
+        // Level 2: If no exact match, try removing version numbers (e.g., "Python Optimizer 2.0" -> "Python Optimizer")
+        if (!foundSpecificMatch) {
+            const promptWithoutVersion = prompt.replace(/\s*\d+\.?\d*\s*$/gi, '').trim();
+            const promptWithoutVersionClean = promptWithoutVersion.toLowerCase().replace(/[^a-z0-9]/gi, '');
             
-            // First, look for exact base robot matches (e.g., "python", "javascript")
-            for (const robot of allExistingRobots) {
-                const robotNameClean = robot.name.toLowerCase().replace(/[^a-z0-9]/gi, '');
-                
-                // Exact match gets highest priority
-                if (robotNameClean === wordClean) {
-                    if (!foundBaseRobots.has(robotNameClean)) {
-                        foundBaseRobots.add(robotNameClean);
-                        // Remove any previously added variations of this robot
-                        relatedRobots = relatedRobots.filter(r => 
-                            !r.name.toLowerCase().includes(wordClean) || 
-                            r.name.toLowerCase().replace(/[^a-z0-9]/gi, '') === wordClean
-                        );
+            if (promptWithoutVersionClean !== promptClean) {
+                for (const robot of allExistingRobots) {
+                    const robotNameClean = robot.name.toLowerCase().replace(/[^a-z0-9]/gi, '');
+                    if (robotNameClean === promptWithoutVersionClean) {
                         relatedRobots.push(robot);
-                        console.log(`Found BASE robot: ${robot.name} from ${robot.source}`);
+                        console.log(`Found version-base match robot: ${robot.name} from ${robot.source}`);
+                        foundSpecificMatch = true;
+                        break;
                     }
-                    break;
                 }
             }
+        }
+        
+        // Level 3: If still no match, look for individual word matches (base robots)
+        if (!foundSpecificMatch) {
+            const foundBaseRobots = new Set();
             
-            // If we didn't find an exact match, look for partial matches
-            // But skip if we already have the base robot
-            if (!foundBaseRobots.has(wordClean)) {
+            for (const word of promptWords) {
+                const wordClean = word.replace(/[^a-z0-9]/gi, '').toLowerCase();
+                if (wordClean.length < 2) continue;
+                
+                // Look for exact base robot matches (e.g., "python", "javascript", "optimizer")
                 for (const robot of allExistingRobots) {
                     const robotNameClean = robot.name.toLowerCase().replace(/[^a-z0-9]/gi, '');
                     
-                    // Skip variations if we have the base (e.g., skip "python3" if we have "python")
-                    let skipThisRobot = false;
-                    for (const base of foundBaseRobots) {
-                        if (robotNameClean.includes(base) && robotNameClean !== base) {
-                            skipThisRobot = true;
-                            break;
-                        }
-                    }
-                    if (skipThisRobot) continue;
-                    
-                    // Check for partial matches
-                    if (robotNameClean.includes(wordClean) || wordClean.includes(robotNameClean)) {
-                        if (!relatedRobots.find(r => r.name === robot.name)) {
+                    // Exact match for this word
+                    if (robotNameClean === wordClean) {
+                        if (!foundBaseRobots.has(robotNameClean)) {
+                            foundBaseRobots.add(robotNameClean);
                             relatedRobots.push(robot);
-                            console.log(`Found related robot: ${robot.name} from ${robot.source}`);
+                            console.log(`Found BASE robot: ${robot.name} from ${robot.source}`);
                         }
                         break;
                     }
