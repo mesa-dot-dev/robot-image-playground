@@ -209,7 +209,9 @@ app.post('/api/generate', async function(req, res) {
                 success: true,
                 filename: existingGenerated,
                 research: `Using existing generated robot for ${prompt}`,
-                cached: true
+                cached: true,
+                tokenUsage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, estimated_cost: 0 },
+                cost: '$0.0000'
             });
             return;
         }
@@ -240,7 +242,9 @@ app.post('/api/generate', async function(req, res) {
                 filename: filename,
                 research: `Using existing reference robot for ${prompt}`,
                 cached: true,
-                source: 'reference'
+                source: 'reference',
+                tokenUsage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, estimated_cost: 0 },
+                cost: '$0.0000'
             });
             return;
         }
@@ -485,6 +489,53 @@ REMINDER: NO TEXT ON THE ROBOT - Do not write "${prompt}" or any text on the rob
         // The result is base64 encoded image data
         const imageBase64Result = imageGenerationCalls[0].result;
 
+        // Calculate token usage and cost
+        let tokenInfo = {
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            total_tokens: 0,
+            estimated_cost: 0
+        };
+
+        // Check for usage information in the response
+        if (response.usage) {
+            tokenInfo.prompt_tokens = response.usage.prompt_tokens || 0;
+            tokenInfo.completion_tokens = response.usage.completion_tokens || 0;
+            tokenInfo.total_tokens = response.usage.total_tokens || 0;
+            
+            // Calculate cost based on GPT-image-1 pricing
+            // GPT-image-1: $10.00 per 1M input tokens, $40.00 per 1M output tokens
+            const inputCost = (tokenInfo.prompt_tokens / 1000000) * 10.00;
+            const outputCost = (tokenInfo.completion_tokens / 1000000) * 40.00;
+            
+            // Image generation tokens based on quality and size
+            // High quality 1024x1024: ~4,160 tokens (output tokens)
+            const imageTokens = 4160; // for high quality 1024x1024
+            const imageCost = (imageTokens / 1000000) * 40.00;
+            
+            tokenInfo.estimated_cost = inputCost + outputCost + imageCost;
+            
+            console.log('Token Usage:', {
+                prompt_tokens: tokenInfo.prompt_tokens,
+                completion_tokens: tokenInfo.completion_tokens,
+                image_tokens: imageTokens,
+                total_tokens: tokenInfo.total_tokens + imageTokens,
+                input_cost: `$${inputCost.toFixed(6)}`,
+                output_cost: `$${outputCost.toFixed(6)}`,
+                image_cost: `$${imageCost.toFixed(4)}`,
+                total_cost: `$${tokenInfo.estimated_cost.toFixed(4)}`
+            });
+        } else {
+            // If no usage data, estimate based on typical usage
+            const imageTokens = 4160; // High quality image
+            const estimatedPromptTokens = 500; // Rough estimate
+            const inputCost = (estimatedPromptTokens / 1000000) * 10.00;
+            const imageCost = (imageTokens / 1000000) * 40.00;
+            tokenInfo.estimated_cost = inputCost + imageCost;
+            
+            console.log('Estimated cost (no usage data):', `$${tokenInfo.estimated_cost.toFixed(4)}`);
+        }
+
         console.log('Image generated successfully');
 
         // Convert base64 to buffer
@@ -500,7 +551,9 @@ REMINDER: NO TEXT ON THE ROBOT - Do not write "${prompt}" or any text on the rob
         res.json({
             success: true,
             filename: filename,
-            research: research.substring(0, 200) + '...' // Send truncated research for UI
+            research: research.substring(0, 200) + '...', // Send truncated research for UI
+            tokenUsage: tokenInfo,
+            cost: `$${tokenInfo.estimated_cost.toFixed(4)}`
         });
 
     } catch (error) {

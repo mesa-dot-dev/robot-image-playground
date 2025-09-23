@@ -234,6 +234,14 @@
             <p>Generate unique robot avatars for programming languages and concepts</p>
         </div>
         
+        <div class="cost-summary" id="costSummary" style="margin: 20px auto; padding: 15px; background: #f0f8ff; border-radius: 8px; display: none; max-width: 400px;">
+            <h3 style="margin: 0 0 10px 0; color: #333; font-size: 1.1em;">Session Cost Summary</h3>
+            <div style="font-family: monospace; color: #666; font-size: 0.9em;">
+                Total API calls: <span id="totalCalls">0</span><br>
+                Total cost: <span id="totalCost" style="font-weight: bold; color: #2196F3;">$0.0000</span>
+            </div>
+        </div>
+        
         <div class="main-content">
             <div class="input-section">
                 <input 
@@ -280,6 +288,23 @@
         const currentImageContainer = document.getElementById('currentImageContainer');
         const galleryGrid = document.getElementById('galleryGrid');
         const consoleEl = document.getElementById('console');
+
+        // Cost tracking
+        let sessionCosts = {
+            totalCalls: 0,
+            totalCost: 0
+        };
+
+        function updateCostSummary(cost) {
+            if (cost && cost !== '$0.0000') {
+                sessionCosts.totalCalls++;
+                sessionCosts.totalCost += parseFloat(cost.replace('$', ''));
+                
+                document.getElementById('costSummary').style.display = 'block';
+                document.getElementById('totalCalls').textContent = sessionCosts.totalCalls;
+                document.getElementById('totalCost').textContent = `$${sessionCosts.totalCost.toFixed(4)}`;
+            }
+        }
 
         function addConsoleLog(message, type = 'info') {
             const line = document.createElement('div');
@@ -348,6 +373,16 @@
                 // Log research results if available
                 if (data.research) {
                     addConsoleLog(`Research: ${data.research}`, 'info');
+                }
+
+                // Log cost information if available
+                if (data.tokenUsage) {
+                    const totalTokens = data.tokenUsage.total_tokens + (data.tokenUsage.image_tokens || 4160);
+                    addConsoleLog(`Token usage: ${totalTokens} tokens`, 'info');
+                    addConsoleLog(`Estimated cost: ${data.cost}`, 'success');
+                    updateCostSummary(data.cost);
+                } else if (data.cached) {
+                    addConsoleLog(`Using cached image (no API cost)`, 'info');
                 }
 
                 addConsoleLog('Image generated successfully!', 'success');
