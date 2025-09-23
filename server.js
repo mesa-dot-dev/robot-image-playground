@@ -69,7 +69,7 @@ async function imageToBase64(imagePath) {
 }
 
 // Analyze reference images using GPT-4 Vision to extract style
-async function analyzeReferenceStyle(referenceImages, model = 'openai') {
+async function analyzeReferenceStyle(referenceImages, model = 'openai', isUniqueConcept = false) {
     try {
         console.log('Analyzing reference images for style...');
         
@@ -324,10 +324,10 @@ REMINDER: NO TEXT ON THE ROBOT - Do not write "${prompt}" or any text on the rob
 }
 
 // Generate image using Google Gemini
-async function generateWithGoogle(prompt, referenceImages, relatedRobots) {
+async function generateWithGoogle(prompt, referenceImages, relatedRobots, extensiveThinking = true) {
     console.log('Using Google Gemini 2.5 Flash Image (Nano Banana) for generation');
     
-    const { finalPrompt, research } = await buildGenerationPrompt(prompt, referenceImages, relatedRobots);
+    const { finalPrompt, research } = await buildGenerationPrompt(prompt, referenceImages, relatedRobots, extensiveThinking);
     
     // Process reference images for Google
     const referenceBase64Images = [];
@@ -406,10 +406,10 @@ async function generateWithGoogle(prompt, referenceImages, relatedRobots) {
 }
 
 // Generate image using OpenAI
-async function generateWithOpenAI(prompt, referenceImages, relatedRobots) {
+async function generateWithOpenAI(prompt, referenceImages, relatedRobots, extensiveThinking = true) {
     console.log('Using OpenAI GPT-4o with image generation tool');
     
-    const { finalPrompt, research } = await buildGenerationPrompt(prompt, referenceImages, relatedRobots);
+    const { finalPrompt, research } = await buildGenerationPrompt(prompt, referenceImages, relatedRobots, extensiveThinking);
     
     // Process reference images for OpenAI
     const referenceBase64Images = [];
@@ -627,13 +627,13 @@ async function findRelatedRobots(prompt) {
 // Generate image endpoint
 app.post('/api/generate', async function(req, res) {
     try {
-        const { prompt, model = 'openai' } = req.body;
+        const { prompt, model = 'openai', extensiveThinking = true } = req.body;
         
         if (!prompt) {
             return res.status(400).json({ error: 'Prompt is required' });
         }
 
-        console.log(`Generating robot for: ${prompt} using ${model}`);
+        console.log(`Generating robot for: ${prompt} using ${model}${extensiveThinking ? ' with extensive thinking' : ' (fast mode)'}`);
         
         // Handle "both" option - generate with both models in parallel
         if (model === 'both') {
@@ -683,7 +683,7 @@ app.post('/api/generate', async function(req, res) {
                 };
             } else {
                 promises.push(
-                    generateWithOpenAI(prompt, referenceImages, relatedRobots)
+                    generateWithOpenAI(prompt, referenceImages, relatedRobots, extensiveThinking)
                         .then(result => {
                             const filename = `${normalizedPrompt}_openai_${Date.now()}.png`;
                             const filepath = path.join(generatedDir, filename);
@@ -718,7 +718,7 @@ app.post('/api/generate', async function(req, res) {
                 };
             } else {
                 promises.push(
-                    generateWithGoogle(prompt, referenceImages, relatedRobots)
+                    generateWithGoogle(prompt, referenceImages, relatedRobots, extensiveThinking)
                         .then(result => {
                             const filename = `${normalizedPrompt}_google_${Date.now()}.png`;
                             const filepath = path.join(generatedDir, filename);
@@ -863,9 +863,9 @@ app.post('/api/generate', async function(req, res) {
         // Generate image based on selected model
         let result;
         if (model === 'google') {
-            result = await generateWithGoogle(prompt, referenceImages, relatedRobots);
+            result = await generateWithGoogle(prompt, referenceImages, relatedRobots, extensiveThinking);
         } else {
-            result = await generateWithOpenAI(prompt, referenceImages, relatedRobots);
+            result = await generateWithOpenAI(prompt, referenceImages, relatedRobots, extensiveThinking);
         }
         
         // Save the image
