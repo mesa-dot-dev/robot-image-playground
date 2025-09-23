@@ -86,7 +86,17 @@ async function analyzeReferenceStyle(referenceImages, model = 'openai') {
             return getDefaultStyleDescription();
         }
         
-        const analysisPrompt = `Analyze these robot images and provide a detailed style guide for creating similar robots. Focus on:
+        const analysisPrompt = isUniqueConcept 
+            ? `Analyze these robot images to extract ONLY the rendering style and quality. Focus on:
+        1. 3D rendering technique and quality
+        2. Material properties (metallic, plastic, matte, glossy)
+        3. Lighting setup and shadows
+        4. Background style
+        5. Overall polish and professional quality
+        
+        IMPORTANT: Do NOT describe the specific robot designs, shapes, or forms. We want to understand the RENDERING STYLE only, not the robot designs themselves.
+        The goal is to match the rendering quality while creating a completely different robot design.`
+            : `Analyze these robot images and provide a detailed style guide for creating similar robots. Focus on:
         1. Overall aesthetic (realistic, stylized, retro-futuristic, etc.)
         2. Material and texture details (metal type, wear patterns, surface finish)
         3. Color palette approach
@@ -181,12 +191,24 @@ async function researchConcept(concept, model = 'openai') {
     try {
         console.log(`Researching: ${concept} using ${model}`);
         
-        const researchPrompt = `Research the programming language or technical concept "${concept}". 
-        Provide:
+        const researchPrompt = `Research the concept "${concept}". 
+        
+        First, determine if this is:
+        A) A known programming language, framework, or technology (like Python, React, etc.)
+        B) A unique/custom concept that doesn't exist as a standard technology
+        
+        If it's A (known technology):
         1. Official brand colors (hex codes if available)
         2. Key visual characteristics or logo elements
         3. Core philosophy or personality traits
         4. Any associated imagery or metaphors
+        
+        If it's B (unique concept like "Concurrency Checker"):
+        1. Break down what the concept might mean or do
+        2. Suggest visual metaphors that represent this concept
+        3. Recommend colors and design elements that would be appropriate
+        4. Ensure the suggestions are UNIQUE and don't copy existing tech brands
+        
         Keep the response concise and focused on visual/design elements.`;
         
         if (model === 'google') {
@@ -232,9 +254,29 @@ async function researchConcept(concept, model = 'openai') {
 }
 
 // Build the generation prompt (shared between models)
-async function buildGenerationPrompt(prompt, referenceImages, relatedRobots) {
-        const styleGuide = await analyzeReferenceStyle(referenceImages);
-        const research = await researchConcept(prompt);
+async function buildGenerationPrompt(prompt, referenceImages, relatedRobots, extensiveThinking = true) {
+        // Check if this is a unique/non-standard concept (not a known programming language or tech)
+        const isUniqueConcept = relatedRobots.length === 0;
+        
+        const styleGuide = extensiveThinking ? await analyzeReferenceStyle(referenceImages, 'openai', isUniqueConcept) : getDefaultStyleDescription();
+        const research = extensiveThinking ? await researchConcept(prompt) : `Creating a robot for ${prompt}`;
+        
+        // For unique concepts, we need to ensure the robot is distinctly different
+        const uniquenessInstruction = isUniqueConcept 
+            ? `\n⚠️ CRITICAL UNIQUENESS REQUIREMENT ⚠️
+This is "${prompt}" - a UNIQUE CONCEPT not found in existing robots or programming languages.
+
+MANDATORY: Create a COMPLETELY ORIGINAL robot design that:
+1. MUST BE DISTINCTLY DIFFERENT from ALL reference images shown
+2. Should NOT resemble any specific reference robot
+3. Use the reference images ONLY for understanding the general 3D rendering style and quality
+4. Create a UNIQUE form/shape/character that represents "${prompt}" conceptually
+5. DO NOT copy or closely imitate any reference robot's body shape, head design, or overall form
+6. Invent NEW design elements specific to "${prompt}"
+
+The reference images are provided ONLY to show the rendering quality and style (3D, materials, lighting) - NOT to copy their designs.
+Create something ENTIRELY NEW while maintaining the same professional 3D rendering quality.\n`
+            : '';
 
         const relatedInfo = relatedRobots.length > 0 
             ? `\nCRITICAL: The reference images include base robots for: ${relatedRobots.map(r => r.name).join(', ')}. 
@@ -246,7 +288,7 @@ KEY INSTRUCTION: The new "${prompt}" robot MUST maintain the CORE VISUAL IDENTIT
 - Add variations and details specific to "${prompt}" but DO NOT change the core identity
 
 Think of this as creating a variant or evolution of the base robot, not a completely different robot.\n`
-            : '';
+            : uniquenessInstruction;
             
         const finalPrompt = `Create a 3D rendered robot based on the reference images provided. The robot MUST match the exact 3D rendering style, materials, and quality of the reference robots - NOT a drawing or illustration.
 
@@ -272,7 +314,9 @@ REQUIREMENTS:
 ${prompt.toUpperCase()} SPECIFIC CUSTOMIZATION:
 ${research}
 
-IMPORTANT: This is "${prompt}" - create a VARIANT of the base robot(s) that maintains their core visual identity (same creature/form/shape) while adding elements specific to "${prompt}". Do NOT create a completely different robot - think of this as the same robot family with modifications.
+${isUniqueConcept 
+    ? `REMEMBER: "${prompt}" is a UNIQUE concept - create an ORIGINAL robot design that doesn't copy any reference robot's form!`
+    : `IMPORTANT: This is "${prompt}" - create a VARIANT of the base robot(s) that maintains their core visual identity (same creature/form/shape) while adding elements specific to "${prompt}". Do NOT create a completely different robot - think of this as the same robot family with modifications.`}
 
 REMINDER: NO TEXT ON THE ROBOT - Do not write "${prompt}" or any text on the robot. Express the concept through design, colors, and form only.`;
 
@@ -623,7 +667,8 @@ app.post('/api/generate', async function(req, res) {
                 console.log(`Using ${relatedRobots.length} related robots as ONLY references (no random filling)`);
                 referenceImages = relatedRobots.map(r => r.path);
             } else {
-                console.log('No related robots found, using 10 random reference images');
+                console.log(`⚠️ UNIQUE CONCEPT DETECTED: "${prompt}" - No related robots found`);
+                console.log('Loading random reference images for STYLE ONLY (not design copying)');
                 referenceImages = await loadReferenceImages(10);
             }
             
@@ -810,7 +855,8 @@ app.post('/api/generate', async function(req, res) {
             console.log(`Using ${relatedRobots.length} related robots as ONLY references (no random filling)`);
             referenceImages = relatedRobots.map(r => r.path);
         } else {
-            console.log('No related robots found, using 10 random reference images');
+            console.log(`⚠️ UNIQUE CONCEPT DETECTED: "${prompt}" - No related robots found`);
+            console.log('Loading random reference images for STYLE ONLY (not design copying)');
             referenceImages = await loadReferenceImages(10);
         }
         
