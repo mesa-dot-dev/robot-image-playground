@@ -74,7 +74,7 @@ async function analyzeReferenceStyle(referenceImages, model = 'openai') {
         console.log('Analyzing reference images for style...');
         
         // Convert images to base64
-        const imagePromises = referenceImages.slice(0, 5).map(async (imagePath) => {
+        const imagePromises = referenceImages.slice(0, 8).map(async (imagePath) => {
             const base64 = await imageToBase64(imagePath);
             return base64;
         });
@@ -289,7 +289,7 @@ async function generateWithGoogle(prompt, referenceImages, relatedRobots) {
     const referenceBase64Images = [];
     console.log(`Processing ${referenceImages.length} reference images for Google...`);
     
-    for (let i = 0; i < Math.min(referenceImages.length, 3); i++) { // Google works best with up to 3 images
+    for (let i = 0; i < Math.min(referenceImages.length, 10); i++) { // Google now supports up to 10 images
         const imagePath = referenceImages[i];
         try {
             const buffer = await sharp(imagePath)
@@ -620,14 +620,10 @@ app.post('/api/generate', async function(req, res) {
             const relatedRobots = await findRelatedRobots(prompt);
             let referenceImages = [];
             if (relatedRobots.length > 0) {
-                console.log(`Using ${relatedRobots.length} related robots as primary references`);
+                console.log(`Using ${relatedRobots.length} related robots as ONLY references (no random filling)`);
                 referenceImages = relatedRobots.map(r => r.path);
-                if (referenceImages.length < 10) {
-                    const additionalCount = 10 - referenceImages.length;
-                    const randomRefs = await loadReferenceImages(additionalCount);
-                    referenceImages = [...referenceImages, ...randomRefs];
-                }
             } else {
+                console.log('No related robots found, using 10 random reference images');
                 referenceImages = await loadReferenceImages(10);
             }
             
@@ -811,15 +807,10 @@ app.post('/api/generate', async function(req, res) {
         
         let referenceImages = [];
         if (relatedRobots.length > 0) {
-            console.log(`Using ${relatedRobots.length} related robots as primary references`);
+            console.log(`Using ${relatedRobots.length} related robots as ONLY references (no random filling)`);
             referenceImages = relatedRobots.map(r => r.path);
-            
-            if (referenceImages.length < 10) {
-                const additionalCount = 10 - referenceImages.length;
-                const randomRefs = await loadReferenceImages(additionalCount);
-                referenceImages = [...referenceImages, ...randomRefs];
-            }
         } else {
+            console.log('No related robots found, using 10 random reference images');
             referenceImages = await loadReferenceImages(10);
         }
         
