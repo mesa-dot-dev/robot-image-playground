@@ -249,7 +249,7 @@ app.post('/api/generate', async function(req, res) {
         console.log('No existing robot found, generating new one...');
 
         // Look for related robots to use as primary references
-        const relatedRobots = [];
+        let relatedRobots = [];
         
         // Extract potential robot names from the prompt (split by common delimiters)
         const promptWords = prompt.toLowerCase().split(/[\s\-_,&+]/);
@@ -279,24 +279,57 @@ app.post('/api/generate', async function(req, res) {
             }
         }
         
-        // Find matching robots based on prompt words
-        for (const robot of allExistingRobots) {
-            const robotNameClean = robot.name.toLowerCase().replace(/[^a-z0-9]/gi, '');
+        // Find matching robots based on prompt words - prioritize exact base matches
+        const foundBaseRobots = new Set();
+        
+        for (const word of promptWords) {
+            const wordClean = word.replace(/[^a-z0-9]/gi, '').toLowerCase();
+            if (wordClean.length < 2) continue;
             
-            // Check if any word in the prompt matches this robot
-            for (const word of promptWords) {
-                const wordClean = word.replace(/[^a-z0-9]/gi, '');
-                if (wordClean.length > 2 && (
-                    robotNameClean === wordClean || 
-                    robotNameClean.includes(wordClean) || 
-                    wordClean.includes(robotNameClean)
-                )) {
-                    // Found a related robot
-                    if (!relatedRobots.find(r => r.name === robot.name)) {
+            // First, look for exact base robot matches (e.g., "python", "javascript")
+            for (const robot of allExistingRobots) {
+                const robotNameClean = robot.name.toLowerCase().replace(/[^a-z0-9]/gi, '');
+                
+                // Exact match gets highest priority
+                if (robotNameClean === wordClean) {
+                    if (!foundBaseRobots.has(robotNameClean)) {
+                        foundBaseRobots.add(robotNameClean);
+                        // Remove any previously added variations of this robot
+                        relatedRobots = relatedRobots.filter(r => 
+                            !r.name.toLowerCase().includes(wordClean) || 
+                            r.name.toLowerCase().replace(/[^a-z0-9]/gi, '') === wordClean
+                        );
                         relatedRobots.push(robot);
-                        console.log(`Found related robot: ${robot.name} from ${robot.source}`);
+                        console.log(`Found BASE robot: ${robot.name} from ${robot.source}`);
                     }
                     break;
+                }
+            }
+            
+            // If we didn't find an exact match, look for partial matches
+            // But skip if we already have the base robot
+            if (!foundBaseRobots.has(wordClean)) {
+                for (const robot of allExistingRobots) {
+                    const robotNameClean = robot.name.toLowerCase().replace(/[^a-z0-9]/gi, '');
+                    
+                    // Skip variations if we have the base (e.g., skip "python3" if we have "python")
+                    let skipThisRobot = false;
+                    for (const base of foundBaseRobots) {
+                        if (robotNameClean.includes(base) && robotNameClean !== base) {
+                            skipThisRobot = true;
+                            break;
+                        }
+                    }
+                    if (skipThisRobot) continue;
+                    
+                    // Check for partial matches
+                    if (robotNameClean.includes(wordClean) || wordClean.includes(robotNameClean)) {
+                        if (!relatedRobots.find(r => r.name === robot.name)) {
+                            relatedRobots.push(robot);
+                            console.log(`Found related robot: ${robot.name} from ${robot.source}`);
+                        }
+                        break;
+                    }
                 }
             }
         }
@@ -349,7 +382,15 @@ app.post('/api/generate', async function(req, res) {
 
         // Construct the prompt combining style analysis and concept research
         const relatedInfo = relatedRobots.length > 0 
-            ? `\nIMPORTANT: The reference images include robots for: ${relatedRobots.map(r => r.name).join(', ')}. The new robot should be in the same family/series as these, sharing similar design language while being unique.\n`
+            ? `\nCRITICAL: The reference images include base robots for: ${relatedRobots.map(r => r.name).join(', ')}. 
+            
+KEY INSTRUCTION: The new "${prompt}" robot MUST maintain the CORE VISUAL IDENTITY of these base robots:
+- If the base is a snake head (like Python), this should also be a snake head
+- If the base is a particular shape/form, maintain that shape/form
+- Keep the fundamental character/creature type the same
+- Add variations and details specific to "${prompt}" but DO NOT change the core identity
+
+Think of this as creating a variant or evolution of the base robot, not a completely different robot.\n`
             : '';
             
         const finalPrompt = `Create a 3D rendered robot based on the reference images provided. The robot MUST match the exact 3D rendering style, materials, and quality of the reference robots - NOT a drawing or illustration.
@@ -374,7 +415,7 @@ REQUIREMENTS:
 ${prompt.toUpperCase()} SPECIFIC CUSTOMIZATION:
 ${research}
 
-Make this robot embody ${prompt} through colors and subtle design elements, but it MUST look like it belongs in the same 3D rendered robot series as the reference images, while still being unique in their shapes, colors and concepts.`;
+IMPORTANT: This is "${prompt}" - create a VARIANT of the base robot(s) that maintains their core visual identity (same creature/form/shape) while adding elements specific to "${prompt}". Do NOT create a completely different robot - think of this as the same robot family with modifications.`;
 
         console.log('Using Responses API with gpt-image-1');
         console.log('Calling OpenAI Responses API with image generation tool...');
