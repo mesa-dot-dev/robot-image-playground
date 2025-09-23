@@ -396,6 +396,8 @@ Think of this as creating a variant or evolution of the base robot, not a comple
         const finalPrompt = `Create a 3D rendered robot based on the reference images provided. The robot MUST match the exact 3D rendering style, materials, and quality of the reference robots - NOT a drawing or illustration.
 
 CRITICAL: This should be a photorealistic 3D render, exactly like the reference images.
+
+ABSOLUTELY NO TEXT: The robot must have NO TEXT, NO LETTERS, NO WORDS, NO LABELS anywhere on it. Do NOT write "${prompt}" or any other text on the robot's body, head, or any part. The robot should be completely text-free, just like the reference images.
 ${relatedInfo}
 STYLE TO MAINTAIN (from reference analysis):
 ${styleGuide}
@@ -410,12 +412,14 @@ REQUIREMENTS:
 - Robot facing slightly left (3/4 view)
 - Single robot only, no additional objects
 - Square image composition
-- No text or labels
+- NO TEXT OR LABELS - absolutely no written words, letters, or numbers on the robot
 
 ${prompt.toUpperCase()} SPECIFIC CUSTOMIZATION:
 ${research}
 
-IMPORTANT: This is "${prompt}" - create a VARIANT of the base robot(s) that maintains their core visual identity (same creature/form/shape) while adding elements specific to "${prompt}". Do NOT create a completely different robot - think of this as the same robot family with modifications.`;
+IMPORTANT: This is "${prompt}" - create a VARIANT of the base robot(s) that maintains their core visual identity (same creature/form/shape) while adding elements specific to "${prompt}". Do NOT create a completely different robot - think of this as the same robot family with modifications.
+
+REMINDER: NO TEXT ON THE ROBOT - Do not write "${prompt}" or any text on the robot. Express the concept through design, colors, and form only.`;
 
         console.log('Using Responses API with gpt-image-1');
         console.log('Calling OpenAI Responses API with image generation tool...');
