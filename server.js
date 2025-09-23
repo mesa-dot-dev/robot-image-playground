@@ -6,6 +6,7 @@ const OpenAI = require('openai');
 const sharp = require('sharp');
 const FormData = require('form-data');
 const axios = require('axios');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const app = express();
 const PORT = 3000;
@@ -14,6 +15,9 @@ const PORT = 3000;
 const openai = new OpenAI({
     apiKey: 'process.env.OPENAI_API_KEY'
 });
+
+// Initialize Google Gemini client
+const googleAI = new GoogleGenerativeAI('process.env.GOOGLE_API_KEY');
 
 // Middleware
 app.use(express.json());
@@ -65,7 +69,7 @@ async function imageToBase64(imagePath) {
 }
 
 // Analyze reference images using GPT-4 Vision to extract style
-async function analyzeReferenceStyle(referenceImages) {
+async function analyzeReferenceStyle(referenceImages, model = 'openai') {
     try {
         console.log('Analyzing reference images for style...');
         
@@ -82,7 +86,45 @@ async function analyzeReferenceStyle(referenceImages) {
             return getDefaultStyleDescription();
         }
         
-        // Create messages with images for GPT-4 Vision
+        const analysisPrompt = `Analyze these robot images and provide a detailed style guide for creating similar robots. Focus on:
+        1. Overall aesthetic (realistic, stylized, retro-futuristic, etc.)
+        2. Material and texture details (metal type, wear patterns, surface finish)
+        3. Color palette approach
+        4. Head and body proportions
+        5. Eye/face design patterns
+        6. Level of detail and complexity
+        7. Lighting and rendering style
+        8. Any consistent design elements across the robots
+        
+        Provide a concise but detailed description that could be used to generate similar robots.`;
+        
+        if (model === 'google') {
+            // Use Google Gemini for analysis
+            try {
+                const parts = [
+                    { text: analysisPrompt },
+                    ...base64Images.map(img => ({
+                        inlineData: {
+                            mimeType: 'image/png',
+                            data: img.split(',')[1] // Remove data:image/png;base64, prefix
+                        }
+                    }))
+                ];
+                
+                const model = googleAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
+                const result = await model.generateContent(parts);
+                
+                const response = await result.response;
+                const styleAnalysis = response.text();
+                console.log('Style analysis completed with Google Gemini');
+                return styleAnalysis;
+            } catch (error) {
+                console.error('Google Gemini analysis failed, falling back to OpenAI:', error);
+                // Fall back to OpenAI if Google fails
+            }
+        }
+        
+        // Use OpenAI for analysis (default or fallback)
         const messages = [
             {
                 role: "system",
@@ -93,17 +135,7 @@ async function analyzeReferenceStyle(referenceImages) {
                 content: [
                     {
                         type: "text",
-                        text: `Analyze these robot images and provide a detailed style guide for creating similar robots. Focus on:
-                        1. Overall aesthetic (realistic, stylized, retro-futuristic, etc.)
-                        2. Material and texture details (metal type, wear patterns, surface finish)
-                        3. Color palette approach
-                        4. Head and body proportions
-                        5. Eye/face design patterns
-                        6. Level of detail and complexity
-                        7. Lighting and rendering style
-                        8. Any consistent design elements across the robots
-                        
-                        Provide a concise but detailed description that could be used to generate similar robots.`
+                        text: analysisPrompt
                     },
                     ...base64Images.map(img => ({
                         type: "image_url",
@@ -123,7 +155,7 @@ async function analyzeReferenceStyle(referenceImages) {
         });
         
         const styleAnalysis = response.choices[0].message.content;
-        console.log('Style analysis completed');
+        console.log('Style analysis completed with OpenAI');
         return styleAnalysis;
         
     } catch (error) {
@@ -144,11 +176,36 @@ function getDefaultStyleDescription() {
     - 3/4 view angle facing slightly left`;
 }
 
-// Research function using GPT-4 with web search
-async function researchConcept(concept) {
+// Research function using GPT-4 or Gemini
+async function researchConcept(concept, model = 'openai') {
     try {
-        console.log(`Researching: ${concept}`);
+        console.log(`Researching: ${concept} using ${model}`);
         
+        const researchPrompt = `Research the programming language or technical concept "${concept}". 
+        Provide:
+        1. Official brand colors (hex codes if available)
+        2. Key visual characteristics or logo elements
+        3. Core philosophy or personality traits
+        4. Any associated imagery or metaphors
+        Keep the response concise and focused on visual/design elements.`;
+        
+        if (model === 'google') {
+            // Use Google Gemini for research
+            try {
+        const model = googleAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
+        const result = await model.generateContent(researchPrompt);
+                
+                const response = await result.response;
+                const research = response.text();
+                console.log('Research completed with Google Gemini:', research);
+                return research;
+            } catch (error) {
+                console.error('Google Gemini research failed, falling back to OpenAI:', error);
+                // Fall back to OpenAI if Google fails
+            }
+        }
+        
+        // Use OpenAI for research (default or fallback)
         const response = await openai.chat.completions.create({
             model: "gpt-4",
             messages: [
@@ -158,20 +215,14 @@ async function researchConcept(concept) {
                 },
                 {
                     role: "user",
-                    content: `Research the programming language or technical concept "${concept}". 
-                    Provide:
-                    1. Official brand colors (hex codes if available)
-                    2. Key visual characteristics or logo elements
-                    3. Core philosophy or personality traits
-                    4. Any associated imagery or metaphors
-                    Keep the response concise and focused on visual/design elements.`
+                    content: researchPrompt
                 }
             ],
             max_tokens: 300
         });
 
         const research = response.choices[0].message.content;
-        console.log('Research completed:', research);
+        console.log('Research completed with OpenAI:', research);
         return research;
     } catch (error) {
         console.error('Research error:', error);
@@ -180,16 +231,345 @@ async function researchConcept(concept) {
     }
 }
 
+// Build the generation prompt (shared between models)
+async function buildGenerationPrompt(prompt, referenceImages, relatedRobots) {
+    const styleGuide = await analyzeReferenceStyle(referenceImages);
+    const research = await researchConcept(prompt);
+    
+    const relatedInfo = relatedRobots.length > 0 
+        ? `\nCRITICAL: The reference images include base robots for: ${relatedRobots.map(r => r.name).join(', ')}. 
+        
+KEY INSTRUCTION: The new "${prompt}" robot MUST maintain the CORE VISUAL IDENTITY of these base robots:
+- If the base is a snake head (like Python), this should also be a snake head
+- If the base is a particular shape/form, maintain that shape/form
+- Keep the fundamental character/creature type the same
+- Add variations and details specific to "${prompt}" but DO NOT change the core identity
+
+Think of this as creating a variant or evolution of the base robot, not a completely different robot.\n`
+        : '';
+        
+    const finalPrompt = `Create a 3D rendered robot based on the reference images provided. The robot MUST match the exact 3D rendering style, materials, and quality of the reference robots - NOT a drawing or illustration.
+
+CRITICAL: This should be a photorealistic 3D render, exactly like the reference images.
+
+ABSOLUTELY NO TEXT: The robot must have NO TEXT, NO LETTERS, NO WORDS, NO LABELS anywhere on it. Do NOT write "${prompt}" or any other text on the robot's body, head, or any part. The robot should be completely text-free, just like the reference images.
+${relatedInfo}
+STYLE TO MAINTAIN (from reference analysis):
+${styleGuide}
+
+REQUIREMENTS:
+- MUST be a 3D render, NOT a drawing or illustration
+- Keep the EXACT same 3D rendering quality and style as references
+- Same material textures (metal, plastic, etc) as reference robots
+- Maintain similar proportions and mechanical details  
+- Use the same photorealistic lighting and shading
+- White background
+- Robot facing slightly left (3/4 view)
+- Single robot only, no additional objects
+- Square image composition
+- NO TEXT OR LABELS - absolutely no written words, letters, or numbers on the robot
+
+${prompt.toUpperCase()} SPECIFIC CUSTOMIZATION:
+${research}
+
+IMPORTANT: This is "${prompt}" - create a VARIANT of the base robot(s) that maintains their core visual identity (same creature/form/shape) while adding elements specific to "${prompt}". Do NOT create a completely different robot - think of this as the same robot family with modifications.
+
+REMINDER: NO TEXT ON THE ROBOT - Do not write "${prompt}" or any text on the robot. Express the concept through design, colors, and form only.`;
+
+    return { finalPrompt, research, styleGuide };
+}
+
+// Generate image using Google Gemini
+async function generateWithGoogle(prompt, referenceImages, relatedRobots) {
+    console.log('Using Google Gemini 2.5 Flash Image (Nano Banana) for generation');
+    
+    const { finalPrompt, research } = await buildGenerationPrompt(prompt, referenceImages, relatedRobots);
+    
+    // Process reference images for Google
+    const referenceBase64Images = [];
+    console.log(`Processing ${referenceImages.length} reference images for Google...`);
+    
+    for (let i = 0; i < Math.min(referenceImages.length, 3); i++) { // Google works best with up to 3 images
+        const imagePath = referenceImages[i];
+        try {
+            const buffer = await sharp(imagePath)
+                .resize(512, 512, { fit: 'inside', withoutEnlargement: true })
+                .jpeg({ quality: 85 })
+                .toBuffer();
+            referenceBase64Images.push(buffer.toString('base64'));
+            console.log(`Processed reference ${i + 1}: ${path.basename(imagePath)}`);
+        } catch (err) {
+            console.warn(`Failed to process reference image ${imagePath}: ${err}`);
+        }
+    }
+    
+    // Build content array for Google
+    const parts = [
+        { text: finalPrompt }
+    ];
+    
+    // Add reference images
+    for (const base64Image of referenceBase64Images) {
+        parts.push({
+            inlineData: {
+                mimeType: 'image/jpeg',
+                data: base64Image
+            }
+        });
+    }
+    
+    // Generate with Google Gemini
+    const model = googleAI.getGenerativeModel({ model: 'gemini-2.5-flash-image-preview' });
+    const result = await model.generateContent(parts);
+    
+    // Extract the generated image from the response
+    let imageData = null;
+    const response = await result.response;
+    for (const candidate of response.candidates || []) {
+        for (const part of candidate.content.parts || []) {
+            if (part.inlineData) {
+                imageData = part.inlineData.data;
+                break;
+            }
+        }
+        if (imageData) break;
+    }
+    
+    if (!imageData) {
+        throw new Error('No image data returned from Google Gemini');
+    }
+    
+    // Calculate cost for Google Gemini
+    // $30 per 1 million output tokens, each image is 1290 tokens
+    const imageTokens = 1290;
+    const cost = (imageTokens / 1000000) * 30.00;
+    
+    console.log('Google Gemini generation completed');
+    console.log(`Cost: $${cost.toFixed(4)} (${imageTokens} output tokens at $30/1M)`);
+    
+    return {
+        imageBuffer: Buffer.from(imageData, 'base64'),
+        research: research.substring(0, 200) + '...',
+        tokenUsage: {
+            prompt_tokens: 0, // Google doesn't charge for input in image generation
+            completion_tokens: 0,
+            total_tokens: 0,
+            image_tokens: imageTokens,
+            estimated_cost: cost
+        },
+        cost: `$${cost.toFixed(4)}`
+    };
+}
+
+// Generate image using OpenAI
+async function generateWithOpenAI(prompt, referenceImages, relatedRobots) {
+    console.log('Using OpenAI GPT-4o with image generation tool');
+    
+    const { finalPrompt, research } = await buildGenerationPrompt(prompt, referenceImages, relatedRobots);
+    
+    // Process reference images for OpenAI
+    const referenceBase64Images = [];
+    console.log(`Processing ${referenceImages.length} reference images for OpenAI...`);
+    
+    for (let i = 0; i < referenceImages.length; i++) {
+        const imagePath = referenceImages[i];
+        try {
+            const buffer = await sharp(imagePath)
+                .resize(512, 512, { fit: 'inside', withoutEnlargement: true })
+                .jpeg({ quality: 85 })
+                .toBuffer();
+            referenceBase64Images.push(buffer.toString('base64'));
+            console.log(`Processed reference ${i + 1}: ${path.basename(imagePath)}`);
+        } catch (err) {
+            console.warn(`Failed to process reference image ${imagePath}: ${err}`);
+        }
+    }
+    
+    // Build content array with text prompt and all reference images
+    const contentArray = [
+        {
+            type: "input_text",
+            text: finalPrompt
+        }
+    ];
+    
+    // Add all reference images
+    for (const base64Image of referenceBase64Images) {
+        contentArray.push({
+            type: "input_image",
+            image_url: `data:image/jpeg;base64,${base64Image}`
+        });
+    }
+    
+    // Use the Responses API with gpt-image-1
+    const response = await openai.responses.create({
+        model: "gpt-4o",
+        input: [
+            {
+                role: "user",
+                content: contentArray
+            }
+        ],
+        tools: [
+            {
+                type: "image_generation",
+                quality: "high",
+                size: "1024x1024",
+                input_fidelity: "high"
+            }
+        ]
+    });
+    
+    // Extract image data from Responses API response
+    const imageGenerationCalls = response.output?.filter(
+        output => output.type === 'image_generation_call'
+    ) || [];
+    
+    if (imageGenerationCalls.length === 0 || !imageGenerationCalls[0].result) {
+        throw new Error('No image data returned from OpenAI Responses API');
+    }
+    
+    const imageBase64Result = imageGenerationCalls[0].result;
+    
+    // Calculate token usage and cost
+    let tokenInfo = {
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        total_tokens: 0,
+        estimated_cost: 0
+    };
+    
+    if (response.usage) {
+        tokenInfo.prompt_tokens = response.usage.prompt_tokens || 0;
+        tokenInfo.completion_tokens = response.usage.completion_tokens || 0;
+        tokenInfo.total_tokens = response.usage.total_tokens || 0;
+        
+        // Calculate cost based on GPT-image-1 pricing
+        const inputCost = (tokenInfo.prompt_tokens / 1000000) * 10.00;
+        const outputCost = (tokenInfo.completion_tokens / 1000000) * 40.00;
+        
+        // Image generation tokens
+        const imageTokens = 4160; // for high quality 1024x1024
+        const imageCost = (imageTokens / 1000000) * 40.00;
+        
+        tokenInfo.estimated_cost = inputCost + outputCost + imageCost;
+        tokenInfo.image_tokens = imageTokens;
+        
+        console.log('OpenAI Token Usage:', {
+            prompt_tokens: tokenInfo.prompt_tokens,
+            completion_tokens: tokenInfo.completion_tokens,
+            image_tokens: imageTokens,
+            total_tokens: tokenInfo.total_tokens + imageTokens,
+            total_cost: `$${tokenInfo.estimated_cost.toFixed(4)}`
+        });
+    } else {
+        // Estimate if no usage data
+        const imageTokens = 4160;
+        const estimatedPromptTokens = 500;
+        const inputCost = (estimatedPromptTokens / 1000000) * 10.00;
+        const imageCost = (imageTokens / 1000000) * 40.00;
+        tokenInfo.estimated_cost = inputCost + imageCost;
+        tokenInfo.image_tokens = imageTokens;
+    }
+    
+    return {
+        imageBuffer: Buffer.from(imageBase64Result, 'base64'),
+        research: research.substring(0, 200) + '...',
+        tokenUsage: tokenInfo,
+        cost: `$${tokenInfo.estimated_cost.toFixed(4)}`
+    };
+}
+
+// Find related robots for reference
+async function findRelatedRobots(prompt) {
+    const relatedRobots = [];
+    const generatedDir = path.join(__dirname, 'Generated');
+    const referenceDir = path.join(__dirname, 'Reference Images');
+    
+    try {
+        const generatedFiles = await fs.readdir(generatedDir);
+        const referenceFiles = await fs.readdir(referenceDir);
+        
+        // Extract potential robot names from the prompt
+        const promptWords = prompt.toLowerCase().split(/[\s\-_,&+]/);
+        const promptClean = prompt.toLowerCase().replace(/[^a-z0-9]/gi, '');
+        
+        // Get all existing robots
+        const allExistingRobots = [];
+        
+        for (const file of generatedFiles) {
+            if (file.endsWith('.png') || file.endsWith('.jpg') || file.endsWith('.jpeg')) {
+                allExistingRobots.push({
+                    name: path.basename(file, path.extname(file)).replace(/_\d+$/, ''),
+                    path: path.join(generatedDir, file),
+                    source: 'generated'
+                });
+            }
+        }
+        
+        for (const file of referenceFiles) {
+            if (file.endsWith('.png') || file.endsWith('.jpg') || file.endsWith('.jpeg')) {
+                allExistingRobots.push({
+                    name: path.basename(file, path.extname(file)),
+                    path: path.join(referenceDir, file),
+                    source: 'reference'
+                });
+            }
+        }
+        
+        // Look for related robots
+        let foundSpecificMatch = false;
+        
+        // Try exact match
+        for (const robot of allExistingRobots) {
+            const robotNameClean = robot.name.toLowerCase().replace(/[^a-z0-9]/gi, '');
+            if (robotNameClean === promptClean) {
+                relatedRobots.push(robot);
+                console.log(`Found EXACT match robot: ${robot.name}`);
+                foundSpecificMatch = true;
+                break;
+            }
+        }
+        
+        // If no exact match, look for word matches
+        if (!foundSpecificMatch) {
+            const foundBaseRobots = new Set();
+            
+            for (const word of promptWords) {
+                const wordClean = word.replace(/[^a-z0-9]/gi, '').toLowerCase();
+                if (wordClean.length < 2) continue;
+                
+                for (const robot of allExistingRobots) {
+                    const robotNameClean = robot.name.toLowerCase().replace(/[^a-z0-9]/gi, '');
+                    
+                    if (robotNameClean === wordClean) {
+                        if (!foundBaseRobots.has(robotNameClean)) {
+                            foundBaseRobots.add(robotNameClean);
+                            relatedRobots.push(robot);
+                            console.log(`Found BASE robot: ${robot.name}`);
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error finding related robots:', error);
+    }
+    
+    return relatedRobots;
+}
+
 // Generate image endpoint
 app.post('/api/generate', async function(req, res) {
     try {
-        const { prompt } = req.body;
+        const { prompt, model = 'openai' } = req.body;
         
         if (!prompt) {
             return res.status(400).json({ error: 'Prompt is required' });
         }
 
-        console.log(`Generating robot for: ${prompt}`);
+        console.log(`Generating robot for: ${prompt} using ${model}`);
         
         // First check if we already have this robot
         const normalizedPrompt = prompt.toLowerCase().replace(/[^a-z0-9]/gi, '_');
@@ -199,7 +579,6 @@ app.post('/api/generate', async function(req, res) {
         const generatedFiles = await fs.readdir(generatedDir);
         const existingGenerated = generatedFiles.find(file => {
             const fileName = path.basename(file, path.extname(file)).toLowerCase();
-            // Check if filename starts with the normalized prompt (ignoring timestamp)
             return fileName.startsWith(normalizedPrompt + '_') || fileName === normalizedPrompt;
         });
         
@@ -228,12 +607,10 @@ app.post('/api/generate', async function(req, res) {
         
         if (existingReference) {
             console.log(`Found existing reference robot: ${existingReference}`);
-            // Copy the reference image to Generated folder with timestamp
             const sourceFile = path.join(referenceDir, existingReference);
             const filename = `${normalizedPrompt}_${Date.now()}.png`;
             const destFile = path.join(generatedDir, filename);
             
-            // Read and copy the file
             const imageBuffer = await fs.readFile(sourceFile);
             await fs.writeFile(destFile, imageBuffer);
             
@@ -251,309 +628,45 @@ app.post('/api/generate', async function(req, res) {
         
         // If no existing robot found, proceed with generation
         console.log('No existing robot found, generating new one...');
-
-        // Look for related robots to use as primary references
-        let relatedRobots = [];
         
-        // Extract potential robot names from the prompt (split by common delimiters)
-        const promptWords = prompt.toLowerCase().split(/[\s\-_,&+]/);
+        // Find related robots and load reference images
+        const relatedRobots = await findRelatedRobots(prompt);
         
-        // Check both Generated and Reference folders for related robots
-        const allExistingRobots = [];
-        
-        // Get all robots from Generated folder
-        for (const file of generatedFiles) {
-            if (file.endsWith('.png') || file.endsWith('.jpg') || file.endsWith('.jpeg')) {
-                allExistingRobots.push({
-                    name: path.basename(file, path.extname(file)).replace(/_\d+$/, ''), // Remove timestamp
-                    path: path.join(generatedDir, file),
-                    source: 'generated'
-                });
-            }
-        }
-        
-        // Get all robots from Reference Images folder
-        for (const file of referenceFiles) {
-            if (file.endsWith('.png') || file.endsWith('.jpg') || file.endsWith('.jpeg')) {
-                allExistingRobots.push({
-                    name: path.basename(file, path.extname(file)),
-                    path: path.join(referenceDir, file),
-                    source: 'reference'
-                });
-            }
-        }
-        
-        // Hierarchical search for related robots
-        // 1. First try to find the most specific match (full prompt)
-        // 2. Then try progressively less specific matches
-        // 3. Finally fall back to individual word matches
-        
-        const promptClean = prompt.toLowerCase().replace(/[^a-z0-9]/gi, '');
-        let foundSpecificMatch = false;
-        
-        // Level 1: Try exact match of full prompt (e.g., "Python Optimizer 2.0" -> "pythonoptimizer20")
-        for (const robot of allExistingRobots) {
-            const robotNameClean = robot.name.toLowerCase().replace(/[^a-z0-9]/gi, '');
-            if (robotNameClean === promptClean) {
-                relatedRobots.push(robot);
-                console.log(`Found EXACT match robot: ${robot.name} from ${robot.source}`);
-                foundSpecificMatch = true;
-                break;
-            }
-        }
-        
-        // Level 2: If no exact match, try removing version numbers (e.g., "Python Optimizer 2.0" -> "Python Optimizer")
-        if (!foundSpecificMatch) {
-            const promptWithoutVersion = prompt.replace(/\s*\d+\.?\d*\s*$/gi, '').trim();
-            const promptWithoutVersionClean = promptWithoutVersion.toLowerCase().replace(/[^a-z0-9]/gi, '');
-            
-            if (promptWithoutVersionClean !== promptClean) {
-                for (const robot of allExistingRobots) {
-                    const robotNameClean = robot.name.toLowerCase().replace(/[^a-z0-9]/gi, '');
-                    if (robotNameClean === promptWithoutVersionClean) {
-                        relatedRobots.push(robot);
-                        console.log(`Found version-base match robot: ${robot.name} from ${robot.source}`);
-                        foundSpecificMatch = true;
-                        break;
-                    }
-                }
-            }
-        }
-        
-        // Level 3: If still no match, look for individual word matches (base robots)
-        if (!foundSpecificMatch) {
-            const foundBaseRobots = new Set();
-            
-            for (const word of promptWords) {
-                const wordClean = word.replace(/[^a-z0-9]/gi, '').toLowerCase();
-                if (wordClean.length < 2) continue;
-                
-                // Look for exact base robot matches (e.g., "python", "javascript", "optimizer")
-                for (const robot of allExistingRobots) {
-                    const robotNameClean = robot.name.toLowerCase().replace(/[^a-z0-9]/gi, '');
-                    
-                    // Exact match for this word
-                    if (robotNameClean === wordClean) {
-                        if (!foundBaseRobots.has(robotNameClean)) {
-                            foundBaseRobots.add(robotNameClean);
-                            relatedRobots.push(robot);
-                            console.log(`Found BASE robot: ${robot.name} from ${robot.source}`);
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-        
-        // Load reference images - prioritize related robots
         let referenceImages = [];
-        
         if (relatedRobots.length > 0) {
             console.log(`Using ${relatedRobots.length} related robots as primary references`);
-            // Use related robots as primary references
             referenceImages = relatedRobots.map(r => r.path);
             
-            // If we have fewer than 10, add some random ones
             if (referenceImages.length < 10) {
                 const additionalCount = 10 - referenceImages.length;
                 const randomRefs = await loadReferenceImages(additionalCount);
                 referenceImages = [...referenceImages, ...randomRefs];
             }
         } else {
-            // No related robots found, use random references
             referenceImages = await loadReferenceImages(10);
         }
         
-        const styleGuide = await analyzeReferenceStyle(referenceImages);
-        
-        // Research the specific concept
-        const research = await researchConcept(prompt);
-
-        // Process all reference images with better quality
-        const referenceBase64Images = [];
-        console.log(`Processing ${referenceImages.length} reference images...`);
-        
-        for (let i = 0; i < referenceImages.length; i++) {
-            const imagePath = referenceImages[i];
-            try {
-                // Resize to maintain quality while being reasonable size
-                const buffer = await sharp(imagePath)
-                    .resize(512, 512, { fit: 'inside', withoutEnlargement: true })
-                    .jpeg({ quality: 85 })
-                    .toBuffer();
-                referenceBase64Images.push(buffer.toString('base64'));
-                console.log(`Processed reference ${i + 1}: ${path.basename(imagePath)}`);
-            } catch (err) {
-                console.warn(`Failed to process reference image ${imagePath}: ${err}`);
-            }
-        }
-
-        // Create a mask (optional - for now we'll generate without mask)
-        // If we had a mask, it would specify which parts of the image to modify
-
-        // Construct the prompt combining style analysis and concept research
-        const relatedInfo = relatedRobots.length > 0 
-            ? `\nCRITICAL: The reference images include base robots for: ${relatedRobots.map(r => r.name).join(', ')}. 
-            
-KEY INSTRUCTION: The new "${prompt}" robot MUST maintain the CORE VISUAL IDENTITY of these base robots:
-- If the base is a snake head (like Python), this should also be a snake head
-- If the base is a particular shape/form, maintain that shape/form
-- Keep the fundamental character/creature type the same
-- Add variations and details specific to "${prompt}" but DO NOT change the core identity
-
-Think of this as creating a variant or evolution of the base robot, not a completely different robot.\n`
-            : '';
-            
-        const finalPrompt = `Create a 3D rendered robot based on the reference images provided. The robot MUST match the exact 3D rendering style, materials, and quality of the reference robots - NOT a drawing or illustration.
-
-CRITICAL: This should be a photorealistic 3D render, exactly like the reference images.
-
-ABSOLUTELY NO TEXT: The robot must have NO TEXT, NO LETTERS, NO WORDS, NO LABELS anywhere on it. Do NOT write "${prompt}" or any other text on the robot's body, head, or any part. The robot should be completely text-free, just like the reference images.
-${relatedInfo}
-STYLE TO MAINTAIN (from reference analysis):
-${styleGuide}
-
-REQUIREMENTS:
-- MUST be a 3D render, NOT a drawing or illustration
-- Keep the EXACT same 3D rendering quality and style as references
-- Same material textures (metal, plastic, etc) as reference robots
-- Maintain similar proportions and mechanical details  
-- Use the same photorealistic lighting and shading
-- White background
-- Robot facing slightly left (3/4 view)
-- Single robot only, no additional objects
-- Square image composition
-- NO TEXT OR LABELS - absolutely no written words, letters, or numbers on the robot
-
-${prompt.toUpperCase()} SPECIFIC CUSTOMIZATION:
-${research}
-
-IMPORTANT: This is "${prompt}" - create a VARIANT of the base robot(s) that maintains their core visual identity (same creature/form/shape) while adding elements specific to "${prompt}". Do NOT create a completely different robot - think of this as the same robot family with modifications.
-
-REMINDER: NO TEXT ON THE ROBOT - Do not write "${prompt}" or any text on the robot. Express the concept through design, colors, and form only.`;
-
-        console.log('Using Responses API with gpt-image-1');
-        console.log('Calling OpenAI Responses API with image generation tool...');
-
-        let response;
-        try {
-            // Build content array with text prompt and all reference images
-            const contentArray = [
-                {
-                    type: "input_text",
-                    text: finalPrompt
-                }
-            ];
-            
-            // Add all reference images
-            for (const base64Image of referenceBase64Images) {
-                contentArray.push({
-                    type: "input_image",
-                    image_url: `data:image/jpeg;base64,${base64Image}`
-                });
-            }
-            
-            // Use the Responses API with gpt-image-1
-            response = await openai.responses.create({
-                model: "gpt-4o", // Using a model that supports the image generation tool
-                input: [
-                    {
-                        role: "user",
-                        content: contentArray
-                    }
-                ],
-                tools: [
-                    {
-                        type: "image_generation",
-                        quality: "high",
-                        size: "1024x1024",
-                        input_fidelity: "high" // Preserve details from reference images
-                    }
-                ]
-            });
-        } catch (error) {
-            console.error('API call error:', error.response?.data || error);
-            throw error;
-        }
-
-        // Extract image data from Responses API response
-        const imageGenerationCalls = response.output?.filter(
-            output => output.type === 'image_generation_call'
-        ) || [];
-        
-        if (imageGenerationCalls.length === 0 || !imageGenerationCalls[0].result) {
-            console.log('API Response structure:', JSON.stringify(response, null, 2).substring(0, 500));
-            throw new Error('No image data returned from OpenAI Responses API');
-        }
-        
-        // The result is base64 encoded image data
-        const imageBase64Result = imageGenerationCalls[0].result;
-
-        // Calculate token usage and cost
-        let tokenInfo = {
-            prompt_tokens: 0,
-            completion_tokens: 0,
-            total_tokens: 0,
-            estimated_cost: 0
-        };
-
-        // Check for usage information in the response
-        if (response.usage) {
-            tokenInfo.prompt_tokens = response.usage.prompt_tokens || 0;
-            tokenInfo.completion_tokens = response.usage.completion_tokens || 0;
-            tokenInfo.total_tokens = response.usage.total_tokens || 0;
-            
-            // Calculate cost based on GPT-image-1 pricing
-            // GPT-image-1: $10.00 per 1M input tokens, $40.00 per 1M output tokens
-            const inputCost = (tokenInfo.prompt_tokens / 1000000) * 10.00;
-            const outputCost = (tokenInfo.completion_tokens / 1000000) * 40.00;
-            
-            // Image generation tokens based on quality and size
-            // High quality 1024x1024: ~4,160 tokens (output tokens)
-            const imageTokens = 4160; // for high quality 1024x1024
-            const imageCost = (imageTokens / 1000000) * 40.00;
-            
-            tokenInfo.estimated_cost = inputCost + outputCost + imageCost;
-            
-            console.log('Token Usage:', {
-                prompt_tokens: tokenInfo.prompt_tokens,
-                completion_tokens: tokenInfo.completion_tokens,
-                image_tokens: imageTokens,
-                total_tokens: tokenInfo.total_tokens + imageTokens,
-                input_cost: `$${inputCost.toFixed(6)}`,
-                output_cost: `$${outputCost.toFixed(6)}`,
-                image_cost: `$${imageCost.toFixed(4)}`,
-                total_cost: `$${tokenInfo.estimated_cost.toFixed(4)}`
-            });
+        // Generate image based on selected model
+        let result;
+        if (model === 'google') {
+            result = await generateWithGoogle(prompt, referenceImages, relatedRobots);
         } else {
-            // If no usage data, estimate based on typical usage
-            const imageTokens = 4160; // High quality image
-            const estimatedPromptTokens = 500; // Rough estimate
-            const inputCost = (estimatedPromptTokens / 1000000) * 10.00;
-            const imageCost = (imageTokens / 1000000) * 40.00;
-            tokenInfo.estimated_cost = inputCost + imageCost;
-            
-            console.log('Estimated cost (no usage data):', `$${tokenInfo.estimated_cost.toFixed(4)}`);
+            result = await generateWithOpenAI(prompt, referenceImages, relatedRobots);
         }
-
-        console.log('Image generated successfully');
-
-        // Convert base64 to buffer
-        const imageBuffer = Buffer.from(imageBase64Result, 'base64');
         
         // Save the image
-        const filename = `${prompt.replace(/[^a-z0-9]/gi, '_')}_${Date.now()}.png`;
+        const filename = `${normalizedPrompt}_${Date.now()}.png`;
         const filepath = path.join(__dirname, 'Generated', filename);
         
-        await fs.writeFile(filepath, imageBuffer);
+        await fs.writeFile(filepath, result.imageBuffer);
         console.log(`Image saved as: ${filename}`);
 
         res.json({
             success: true,
             filename: filename,
-            research: research.substring(0, 200) + '...', // Send truncated research for UI
-            tokenUsage: tokenInfo,
-            cost: `$${tokenInfo.estimated_cost.toFixed(4)}`
+            research: result.research,
+            tokenUsage: result.tokenUsage,
+            cost: result.cost
         });
 
     } catch (error) {
@@ -561,6 +674,79 @@ REMINDER: NO TEXT ON THE ROBOT - Do not write "${prompt}" or any text on the rob
         res.status(500).json({
             error: error.message || 'Failed to generate image',
             details: error.response?.data || error
+        });
+    }
+});
+
+// Test model endpoint
+app.post('/api/test-model', async function(req, res) {
+    try {
+        const { model = 'openai' } = req.body;
+        
+        console.log(`Testing ${model} model...`);
+        
+        if (model === 'google') {
+            // Test Google Gemini
+            const testPrompt = "Say 'Google Gemini is working!' and nothing else.";
+            
+            const model = googleAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
+            const result = await model.generateContent(testPrompt);
+            
+            const response = await result.response;
+            const text = response.text();
+            console.log('Google Gemini test response:', text);
+            
+            // Test image generation capability
+            const imageTestPrompt = "Create a simple test image of a small robot.";
+            const imageModel = googleAI.getGenerativeModel({ model: 'gemini-2.5-flash-image-preview' });
+            const imageResult = await imageModel.generateContent(imageTestPrompt);
+            
+            let hasImage = false;
+            const imageResponse = await imageResult.response;
+            for (const candidate of imageResponse.candidates || []) {
+                for (const part of candidate.content.parts || []) {
+                    if (part.inlineData) {
+                        hasImage = true;
+                        break;
+                    }
+                }
+            }
+            
+            if (!hasImage) {
+                throw new Error('Google Gemini image generation test failed - no image returned');
+            }
+            
+            res.json({
+                success: true,
+                message: 'Google Gemini (Nano Banana) is working! Image generation tested successfully.',
+                cost: '$0.0390' // Cost for one test image
+            });
+        } else {
+            // Test OpenAI
+            const response = await openai.chat.completions.create({
+                model: "gpt-4",
+                messages: [
+                    {
+                        role: "user",
+                        content: "Say 'OpenAI is working!' and nothing else."
+                    }
+                ],
+                max_tokens: 20
+            });
+            
+            console.log('OpenAI test response:', response.choices[0].message.content);
+            
+            res.json({
+                success: true,
+                message: 'OpenAI GPT-4o is working!',
+                cost: '$0.0001' // Approximate cost for test
+            });
+        }
+    } catch (error) {
+        console.error('Test error:', error);
+        res.status(500).json({
+            error: `${req.body.model === 'google' ? 'Google Gemini' : 'OpenAI'} test failed: ${error.message}`,
+            details: error.response?.data || error.message
         });
     }
 });
@@ -598,6 +784,10 @@ async function startServer() {
 ║                                              ║
 ║     Server running at:                       ║
 ║     http://localhost:${PORT}                     ║
+║                                              ║
+║     Models available:                        ║
+║     - OpenAI GPT-4o (Image Generation)       ║
+║     - Google Gemini 2.5 Flash Image          ║
 ║                                              ║
 ║     Press Ctrl+C to stop                     ║
 ╚══════════════════════════════════════════════╝

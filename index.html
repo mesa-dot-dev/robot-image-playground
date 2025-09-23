@@ -234,11 +234,35 @@
             <p>Generate unique robot avatars for programming languages and concepts</p>
         </div>
         
-        <div class="cost-summary" id="costSummary" style="margin: 20px auto; padding: 15px; background: #f0f8ff; border-radius: 8px; display: none; max-width: 400px;">
+        <div class="model-selector" style="text-align: center; padding: 20px; background: #f9f9f9; border-bottom: 1px solid #e0e0e0;">
+            <label for="modelSelect" style="font-weight: 600; margin-right: 10px;">AI Model:</label>
+            <select id="modelSelect" style="padding: 8px 15px; font-size: 1em; border: 2px solid #e0e0e0; border-radius: 5px; background: white; cursor: pointer;">
+                <option value="openai">OpenAI GPT-4o (Image Generation)</option>
+                <option value="google">Google Gemini 2.5 Flash Image (Nano Banana)</option>
+            </select>
+            <button id="testModelBtn" style="margin-left: 10px; padding: 8px 15px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: 600;">Test Model</button>
+        </div>
+        
+        <div class="cost-summary" id="costSummary" style="margin: 20px auto; padding: 15px; background: #f0f8ff; border-radius: 8px; display: none; max-width: 600px;">
             <h3 style="margin: 0 0 10px 0; color: #333; font-size: 1.1em;">Session Cost Summary</h3>
             <div style="font-family: monospace; color: #666; font-size: 0.9em;">
-                Total API calls: <span id="totalCalls">0</span><br>
-                Total cost: <span id="totalCost" style="font-weight: bold; color: #2196F3;">$0.0000</span>
+                <div style="display: flex; justify-content: space-around;">
+                    <div>
+                        <strong>OpenAI:</strong><br>
+                        Calls: <span id="openaiCalls">0</span><br>
+                        Cost: <span id="openaiCost" style="font-weight: bold; color: #2196F3;">$0.0000</span>
+                    </div>
+                    <div>
+                        <strong>Google:</strong><br>
+                        Calls: <span id="googleCalls">0</span><br>
+                        Cost: <span id="googleCost" style="font-weight: bold; color: #4CAF50;">$0.0000</span>
+                    </div>
+                    <div>
+                        <strong>Total:</strong><br>
+                        Calls: <span id="totalCalls">0</span><br>
+                        Cost: <span id="totalCost" style="font-weight: bold; color: #FF5722;">$0.0000</span>
+                    </div>
+                </div>
             </div>
         </div>
         
@@ -288,21 +312,28 @@
         const currentImageContainer = document.getElementById('currentImageContainer');
         const galleryGrid = document.getElementById('galleryGrid');
         const consoleEl = document.getElementById('console');
+        const modelSelect = document.getElementById('modelSelect');
+        const testModelBtn = document.getElementById('testModelBtn');
 
-        // Cost tracking
+        // Cost tracking per model
         let sessionCosts = {
-            totalCalls: 0,
-            totalCost: 0
+            openai: { calls: 0, cost: 0 },
+            google: { calls: 0, cost: 0 }
         };
 
-        function updateCostSummary(cost) {
+        function updateCostSummary(cost, model) {
             if (cost && cost !== '$0.0000') {
-                sessionCosts.totalCalls++;
-                sessionCosts.totalCost += parseFloat(cost.replace('$', ''));
+                const costValue = parseFloat(cost.replace('$', ''));
+                sessionCosts[model].calls++;
+                sessionCosts[model].cost += costValue;
                 
                 document.getElementById('costSummary').style.display = 'block';
-                document.getElementById('totalCalls').textContent = sessionCosts.totalCalls;
-                document.getElementById('totalCost').textContent = `$${sessionCosts.totalCost.toFixed(4)}`;
+                document.getElementById('openaiCalls').textContent = sessionCosts.openai.calls;
+                document.getElementById('openaiCost').textContent = `$${sessionCosts.openai.cost.toFixed(4)}`;
+                document.getElementById('googleCalls').textContent = sessionCosts.google.calls;
+                document.getElementById('googleCost').textContent = `$${sessionCosts.google.cost.toFixed(4)}`;
+                document.getElementById('totalCalls').textContent = sessionCosts.openai.calls + sessionCosts.google.calls;
+                document.getElementById('totalCost').textContent = `$${(sessionCosts.openai.cost + sessionCosts.google.cost).toFixed(4)}`;
             }
         }
 
@@ -346,12 +377,14 @@
                 return;
             }
 
+            const selectedModel = modelSelect.value;
+
             // Disable input and show spinner
             promptInput.disabled = true;
             generateBtn.disabled = true;
             spinner.classList.add('active');
             
-            addConsoleLog(`Starting generation for: "${prompt}"`, 'info');
+            addConsoleLog(`Starting generation for: "${prompt}" using ${selectedModel === 'google' ? 'Google Gemini' : 'OpenAI'}`, 'info');
 
             try {
                 addConsoleLog('Researching concept and gathering references...', 'info');
@@ -361,7 +394,7 @@
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ prompt })
+                    body: JSON.stringify({ prompt, model: selectedModel })
                 });
 
                 const data = await response.json();
@@ -380,7 +413,7 @@
                     const totalTokens = data.tokenUsage.total_tokens + (data.tokenUsage.image_tokens || 4160);
                     addConsoleLog(`Token usage: ${totalTokens} tokens`, 'info');
                     addConsoleLog(`Estimated cost: ${data.cost}`, 'success');
-                    updateCostSummary(data.cost);
+                    updateCostSummary(data.cost, selectedModel);
                 } else if (data.cached) {
                     addConsoleLog(`Using cached image (no API cost)`, 'info');
                 }
@@ -411,12 +444,55 @@
             }
         }
 
+        // Test model functionality
+        async function testModel() {
+            const selectedModel = modelSelect.value;
+            const testPrompt = 'test robot';
+            
+            addConsoleLog(`Testing ${selectedModel === 'google' ? 'Google Gemini' : 'OpenAI'} model...`, 'info');
+            
+            // Disable button during test
+            testModelBtn.disabled = true;
+            testModelBtn.textContent = 'Testing...';
+            
+            try {
+                const response = await fetch('/api/test-model', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ model: selectedModel })
+                });
+
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.error || 'Test failed');
+                }
+                
+                addConsoleLog(`✅ ${selectedModel === 'google' ? 'Google Gemini' : 'OpenAI'} model test successful!`, 'success');
+                if (data.message) {
+                    addConsoleLog(`Test result: ${data.message}`, 'info');
+                }
+                if (data.cost) {
+                    addConsoleLog(`Test cost: ${data.cost}`, 'info');
+                }
+                
+            } catch (error) {
+                addConsoleLog(`❌ ${selectedModel === 'google' ? 'Google Gemini' : 'OpenAI'} model test failed: ${error.message}`, 'error');
+            } finally {
+                testModelBtn.disabled = false;
+                testModelBtn.textContent = 'Test Model';
+            }
+        }
+
         generateBtn.addEventListener('click', generateImage);
         promptInput.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
                 generateImage();
             }
         });
+        testModelBtn.addEventListener('click', testModel);
 
         // Load existing images on page load
         window.addEventListener('load', loadGallery);
