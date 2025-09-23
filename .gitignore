@@ -2,3 +2,4 @@
 /Generated/.DS_Store
 /Generated
 /server.log
+.env
