@@ -485,10 +485,19 @@ async function findRelatedRobots(prompt) {
     const relatedRobots = [];
     const generatedDir = path.join(__dirname, 'Generated');
     const referenceDir = path.join(__dirname, 'Reference Images');
+    const secondaryReferenceDir = path.join(__dirname, 'Secondary Reference Images');
     
     try {
         const generatedFiles = await fs.readdir(generatedDir);
         const referenceFiles = await fs.readdir(referenceDir);
+        
+        // Also read Secondary Reference Images folder
+        let secondaryReferenceFiles = [];
+        try {
+            secondaryReferenceFiles = await fs.readdir(secondaryReferenceDir);
+        } catch (error) {
+            console.log('Secondary Reference Images folder not found or inaccessible');
+        }
         
         // Extract potential robot names from the prompt
         const promptWords = prompt.toLowerCase().split(/[\s\-_,&+]/);
@@ -513,6 +522,17 @@ async function findRelatedRobots(prompt) {
                     name: path.basename(file, path.extname(file)),
                     path: path.join(referenceDir, file),
                     source: 'reference'
+                });
+            }
+        }
+        
+        // Add robots from Secondary Reference Images folder
+        for (const file of secondaryReferenceFiles) {
+            if (file.endsWith('.png') || file.endsWith('.jpg') || file.endsWith('.jpeg')) {
+                allExistingRobots.push({
+                    name: path.basename(file, path.extname(file)),
+                    path: path.join(secondaryReferenceDir, file),
+                    source: 'secondary_reference'
                 });
             }
         }
@@ -746,6 +766,41 @@ app.post('/api/generate', async function(req, res) {
                 cost: '$0.0000'
             });
             return;
+        }
+        
+        // Check in Secondary Reference Images folder
+        const secondaryReferenceDir = path.join(__dirname, 'Secondary Reference Images');
+        try {
+            const secondaryReferenceFiles = await fs.readdir(secondaryReferenceDir);
+            const existingSecondaryReference = secondaryReferenceFiles.find(file => {
+                const fileName = path.basename(file, path.extname(file)).toLowerCase();
+                const searchTerm = prompt.toLowerCase().replace(/\s+/g, '').replace(/[^a-z0-9]/gi, '');
+                const fileNameClean = fileName.replace(/[^a-z0-9]/gi, '').toLowerCase();
+                return fileNameClean === searchTerm || fileName === prompt.toLowerCase();
+            });
+            
+            if (existingSecondaryReference) {
+                console.log(`Found existing secondary reference robot: ${existingSecondaryReference}`);
+                const sourceFile = path.join(secondaryReferenceDir, existingSecondaryReference);
+                const filename = `${normalizedPrompt}_${Date.now()}.png`;
+                const destFile = path.join(generatedDir, filename);
+                
+                const imageBuffer = await fs.readFile(sourceFile);
+                await fs.writeFile(destFile, imageBuffer);
+                
+                res.json({
+                    success: true,
+                    filename: filename,
+                    research: `Using existing secondary reference robot for ${prompt}`,
+                    cached: true,
+                    source: 'secondary_reference',
+                    tokenUsage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, estimated_cost: 0 },
+                    cost: '$0.0000'
+                });
+                return;
+            }
+        } catch (error) {
+            console.log('Secondary Reference Images folder not found or inaccessible');
         }
         
         // If no existing robot found, proceed with generation
