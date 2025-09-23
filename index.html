@@ -239,6 +239,7 @@
             <select id="modelSelect" style="padding: 8px 15px; font-size: 1em; border: 2px solid #e0e0e0; border-radius: 5px; background: white; cursor: pointer;">
                 <option value="openai">OpenAI GPT-4o (Image Generation)</option>
                 <option value="google">Google Gemini 2.5 Flash Image (Nano Banana)</option>
+                <option value="both">Both Models (Side-by-Side Comparison)</option>
             </select>
             <button id="testModelBtn" style="margin-left: 10px; padding: 8px 15px; background: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer; font-weight: 600;">Test Model</button>
         </div>
@@ -384,7 +385,10 @@
             generateBtn.disabled = true;
             spinner.classList.add('active');
             
-            addConsoleLog(`Starting generation for: "${prompt}" using ${selectedModel === 'google' ? 'Google Gemini' : 'OpenAI'}`, 'info');
+            const modelName = selectedModel === 'google' ? 'Google Gemini' : 
+                             selectedModel === 'openai' ? 'OpenAI' : 
+                             'Both Models';
+            addConsoleLog(`Starting generation for: "${prompt}" using ${modelName}`, 'info');
 
             try {
                 addConsoleLog('Researching concept and gathering references...', 'info');
@@ -409,7 +413,37 @@
                 }
 
                 // Log cost information if available
-                if (data.tokenUsage) {
+                if (data.results) {
+                    // Both models - update costs for each
+                    if (data.results.openai && data.results.openai.success) {
+                        if (!data.results.openai.cached) {
+                            addConsoleLog(`OpenAI cost: ${data.results.openai.cost}`, 'info');
+                            updateCostSummary(data.results.openai.cost, 'openai');
+                        } else {
+                            addConsoleLog(`OpenAI: Using cached image (no API cost)`, 'info');
+                        }
+                    } else if (data.results.openai) {
+                        addConsoleLog(`OpenAI generation failed: ${data.results.openai.error}`, 'error');
+                    }
+                    
+                    if (data.results.google && data.results.google.success) {
+                        if (!data.results.google.cached) {
+                            addConsoleLog(`Google Gemini cost: ${data.results.google.cost}`, 'info');
+                            updateCostSummary(data.results.google.cost, 'google');
+                        } else {
+                            addConsoleLog(`Google Gemini: Using cached image (no API cost)`, 'info');
+                        }
+                    } else if (data.results.google) {
+                        addConsoleLog(`Google Gemini generation failed: ${data.results.google.error}`, 'error');
+                    }
+                    
+                    const openaiCost = data.results.openai?.success ? parseFloat(data.results.openai?.cost?.replace('$', '') || 0) : 0;
+                    const googleCost = data.results.google?.success ? parseFloat(data.results.google?.cost?.replace('$', '') || 0) : 0;
+                    const totalCost = `$${(openaiCost + googleCost).toFixed(4)}`;
+                    if (openaiCost > 0 || googleCost > 0) {
+                        addConsoleLog(`Total cost for both models: ${totalCost}`, 'success');
+                    }
+                } else if (data.tokenUsage) {
                     const totalTokens = data.tokenUsage.total_tokens + (data.tokenUsage.image_tokens || 4160);
                     addConsoleLog(`Token usage: ${totalTokens} tokens`, 'info');
                     addConsoleLog(`Estimated cost: ${data.cost}`, 'success');
@@ -418,12 +452,67 @@
                     addConsoleLog(`Using cached image (no API cost)`, 'info');
                 }
 
-                addConsoleLog('Image generated successfully!', 'success');
+                addConsoleLog('Image generation completed!', 'success');
                 
-                // Display the new image
-                currentImageContainer.innerHTML = `
-                    <img src="/generated/${data.filename}" alt="${prompt}" class="robot-image">
-                `;
+                // Display the image(s)
+                if (data.results) {
+                    // Both models - display side by side
+                    let imagesHTML = '<div style="display: flex; gap: 20px; justify-content: center; align-items: center;">';
+                    
+                    if (data.results.openai) {
+                        if (data.results.openai.success) {
+                            imagesHTML += `
+                                <div style="text-align: center;">
+                                    <h4 style="margin-bottom: 10px; color: #2196F3;">OpenAI</h4>
+                                    <img src="/generated/${data.results.openai.filename}" alt="${prompt} (OpenAI)" class="robot-image" style="width: 250px; height: 250px;">
+                                    <p style="margin-top: 5px; font-size: 0.9em; color: #666;">Cost: ${data.results.openai.cost || '$0.0000'}</p>
+                                </div>
+                            `;
+                        } else {
+                            imagesHTML += `
+                                <div style="text-align: center;">
+                                    <h4 style="margin-bottom: 10px; color: #2196F3;">OpenAI</h4>
+                                    <div style="width: 250px; height: 250px; border-radius: 50%; background: #f5f5f5; display: flex; align-items: center; justify-content: center; flex-direction: column;">
+                                        <span style="color: #d32f2f; font-size: 2em;">❌</span>
+                                        <p style="margin-top: 10px; color: #666; font-size: 0.9em;">Generation Failed</p>
+                                    </div>
+                                    <p style="margin-top: 5px; font-size: 0.8em; color: #d32f2f;">${data.results.openai.error || 'Unknown error'}</p>
+                                </div>
+                            `;
+                        }
+                    }
+                    
+                    if (data.results.google) {
+                        if (data.results.google.success) {
+                            imagesHTML += `
+                                <div style="text-align: center;">
+                                    <h4 style="margin-bottom: 10px; color: #4CAF50;">Google Gemini</h4>
+                                    <img src="/generated/${data.results.google.filename}" alt="${prompt} (Google)" class="robot-image" style="width: 250px; height: 250px;">
+                                    <p style="margin-top: 5px; font-size: 0.9em; color: #666;">Cost: ${data.results.google.cost || '$0.0000'}</p>
+                                </div>
+                            `;
+                        } else {
+                            imagesHTML += `
+                                <div style="text-align: center;">
+                                    <h4 style="margin-bottom: 10px; color: #4CAF50;">Google Gemini</h4>
+                                    <div style="width: 250px; height: 250px; border-radius: 50%; background: #f5f5f5; display: flex; align-items: center; justify-content: center; flex-direction: column;">
+                                        <span style="color: #d32f2f; font-size: 2em;">❌</span>
+                                        <p style="margin-top: 10px; color: #666; font-size: 0.9em;">Generation Failed</p>
+                                    </div>
+                                    <p style="margin-top: 5px; font-size: 0.8em; color: #d32f2f;">${data.results.google.error || 'Unknown error'}</p>
+                                </div>
+                            `;
+                        }
+                    }
+                    
+                    imagesHTML += '</div>';
+                    currentImageContainer.innerHTML = imagesHTML;
+                } else {
+                    // Single model
+                    currentImageContainer.innerHTML = `
+                        <img src="/generated/${data.filename}" alt="${prompt}" class="robot-image">
+                    `;
+                }
 
                 // Reload gallery
                 await loadGallery();
@@ -448,6 +537,11 @@
         async function testModel() {
             const selectedModel = modelSelect.value;
             const testPrompt = 'test robot';
+            
+            if (selectedModel === 'both') {
+                addConsoleLog('Testing both models is not supported. Please select a specific model to test.', 'warning');
+                return;
+            }
             
             addConsoleLog(`Testing ${selectedModel === 'google' ? 'Google Gemini' : 'OpenAI'} model...`, 'info');
             

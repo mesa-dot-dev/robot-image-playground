@@ -233,12 +233,12 @@ async function researchConcept(concept, model = 'openai') {
 
 // Build the generation prompt (shared between models)
 async function buildGenerationPrompt(prompt, referenceImages, relatedRobots) {
-    const styleGuide = await analyzeReferenceStyle(referenceImages);
-    const research = await researchConcept(prompt);
-    
-    const relatedInfo = relatedRobots.length > 0 
-        ? `\nCRITICAL: The reference images include base robots for: ${relatedRobots.map(r => r.name).join(', ')}. 
-        
+        const styleGuide = await analyzeReferenceStyle(referenceImages);
+        const research = await researchConcept(prompt);
+
+        const relatedInfo = relatedRobots.length > 0 
+            ? `\nCRITICAL: The reference images include base robots for: ${relatedRobots.map(r => r.name).join(', ')}. 
+            
 KEY INSTRUCTION: The new "${prompt}" robot MUST maintain the CORE VISUAL IDENTITY of these base robots:
 - If the base is a snake head (like Python), this should also be a snake head
 - If the base is a particular shape/form, maintain that shape/form
@@ -246,9 +246,9 @@ KEY INSTRUCTION: The new "${prompt}" robot MUST maintain the CORE VISUAL IDENTIT
 - Add variations and details specific to "${prompt}" but DO NOT change the core identity
 
 Think of this as creating a variant or evolution of the base robot, not a completely different robot.\n`
-        : '';
-        
-    const finalPrompt = `Create a 3D rendered robot based on the reference images provided. The robot MUST match the exact 3D rendering style, materials, and quality of the reference robots - NOT a drawing or illustration.
+            : '';
+            
+        const finalPrompt = `Create a 3D rendered robot based on the reference images provided. The robot MUST match the exact 3D rendering style, materials, and quality of the reference robots - NOT a drawing or illustration.
 
 CRITICAL: This should be a photorealistic 3D render, exactly like the reference images.
 
@@ -385,90 +385,90 @@ async function generateWithOpenAI(prompt, referenceImages, relatedRobots) {
         }
     }
     
-    // Build content array with text prompt and all reference images
-    const contentArray = [
-        {
-            type: "input_text",
-            text: finalPrompt
-        }
-    ];
-    
-    // Add all reference images
-    for (const base64Image of referenceBase64Images) {
-        contentArray.push({
-            type: "input_image",
-            image_url: `data:image/jpeg;base64,${base64Image}`
-        });
-    }
-    
-    // Use the Responses API with gpt-image-1
+            // Build content array with text prompt and all reference images
+            const contentArray = [
+                {
+                    type: "input_text",
+                    text: finalPrompt
+                }
+            ];
+            
+            // Add all reference images
+            for (const base64Image of referenceBase64Images) {
+                contentArray.push({
+                    type: "input_image",
+                    image_url: `data:image/jpeg;base64,${base64Image}`
+                });
+            }
+            
+            // Use the Responses API with gpt-image-1
     const response = await openai.responses.create({
         model: "gpt-4o",
-        input: [
-            {
-                role: "user",
-                content: contentArray
-            }
-        ],
-        tools: [
-            {
-                type: "image_generation",
-                quality: "high",
-                size: "1024x1024",
+                input: [
+                    {
+                        role: "user",
+                        content: contentArray
+                    }
+                ],
+                tools: [
+                    {
+                        type: "image_generation",
+                        quality: "high",
+                        size: "1024x1024",
                 input_fidelity: "high"
-            }
-        ]
-    });
-    
-    // Extract image data from Responses API response
-    const imageGenerationCalls = response.output?.filter(
-        output => output.type === 'image_generation_call'
-    ) || [];
-    
-    if (imageGenerationCalls.length === 0 || !imageGenerationCalls[0].result) {
-        throw new Error('No image data returned from OpenAI Responses API');
-    }
-    
-    const imageBase64Result = imageGenerationCalls[0].result;
-    
-    // Calculate token usage and cost
-    let tokenInfo = {
-        prompt_tokens: 0,
-        completion_tokens: 0,
-        total_tokens: 0,
-        estimated_cost: 0
-    };
-    
-    if (response.usage) {
-        tokenInfo.prompt_tokens = response.usage.prompt_tokens || 0;
-        tokenInfo.completion_tokens = response.usage.completion_tokens || 0;
-        tokenInfo.total_tokens = response.usage.total_tokens || 0;
+                    }
+                ]
+            });
+
+        // Extract image data from Responses API response
+        const imageGenerationCalls = response.output?.filter(
+            output => output.type === 'image_generation_call'
+        ) || [];
         
-        // Calculate cost based on GPT-image-1 pricing
-        const inputCost = (tokenInfo.prompt_tokens / 1000000) * 10.00;
-        const outputCost = (tokenInfo.completion_tokens / 1000000) * 40.00;
+        if (imageGenerationCalls.length === 0 || !imageGenerationCalls[0].result) {
+            throw new Error('No image data returned from OpenAI Responses API');
+        }
         
+        const imageBase64Result = imageGenerationCalls[0].result;
+
+        // Calculate token usage and cost
+        let tokenInfo = {
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            total_tokens: 0,
+            estimated_cost: 0
+        };
+
+        if (response.usage) {
+            tokenInfo.prompt_tokens = response.usage.prompt_tokens || 0;
+            tokenInfo.completion_tokens = response.usage.completion_tokens || 0;
+            tokenInfo.total_tokens = response.usage.total_tokens || 0;
+            
+            // Calculate cost based on GPT-image-1 pricing
+            const inputCost = (tokenInfo.prompt_tokens / 1000000) * 10.00;
+            const outputCost = (tokenInfo.completion_tokens / 1000000) * 40.00;
+            
         // Image generation tokens
-        const imageTokens = 4160; // for high quality 1024x1024
-        const imageCost = (imageTokens / 1000000) * 40.00;
-        
-        tokenInfo.estimated_cost = inputCost + outputCost + imageCost;
+            const imageTokens = 4160; // for high quality 1024x1024
+            const imageCost = (imageTokens / 1000000) * 40.00;
+            
+            tokenInfo.estimated_cost = inputCost + outputCost + imageCost;
         tokenInfo.image_tokens = imageTokens;
-        
+            
         console.log('OpenAI Token Usage:', {
-            prompt_tokens: tokenInfo.prompt_tokens,
-            completion_tokens: tokenInfo.completion_tokens,
-            image_tokens: imageTokens,
-            total_tokens: tokenInfo.total_tokens + imageTokens,
-            total_cost: `$${tokenInfo.estimated_cost.toFixed(4)}`
-        });
-    } else {
+                prompt_tokens: tokenInfo.prompt_tokens,
+                completion_tokens: tokenInfo.completion_tokens,
+                image_tokens: imageTokens,
+                total_tokens: tokenInfo.total_tokens + imageTokens,
+                total_cost: `$${tokenInfo.estimated_cost.toFixed(4)}`
+            });
+        } else {
         // Estimate if no usage data
         const imageTokens = 4160;
         const estimatedPromptTokens = 500;
-        const inputCost = (estimatedPromptTokens / 1000000) * 10.00;
-        const imageCost = (imageTokens / 1000000) * 40.00;
-        tokenInfo.estimated_cost = inputCost + imageCost;
+            const inputCost = (estimatedPromptTokens / 1000000) * 10.00;
+            const imageCost = (imageTokens / 1000000) * 40.00;
+            tokenInfo.estimated_cost = inputCost + imageCost;
         tokenInfo.image_tokens = imageTokens;
     }
     
@@ -570,6 +570,128 @@ app.post('/api/generate', async function(req, res) {
         }
 
         console.log(`Generating robot for: ${prompt} using ${model}`);
+        
+        // Handle "both" option - generate with both models in parallel
+        if (model === 'both') {
+            console.log('Generating with both models in parallel...');
+            
+            // Check for cached versions first
+            const normalizedPrompt = prompt.toLowerCase().replace(/[^a-z0-9]/gi, '_');
+            const generatedDir = path.join(__dirname, 'Generated');
+            const generatedFiles = await fs.readdir(generatedDir);
+            
+            // Look for existing OpenAI and Google versions
+            const openaiCached = generatedFiles.find(file => {
+                const fileName = path.basename(file, path.extname(file)).toLowerCase();
+                return fileName.startsWith(normalizedPrompt + '_openai_') || 
+                       fileName === normalizedPrompt + '_openai';
+            });
+            
+            const googleCached = generatedFiles.find(file => {
+                const fileName = path.basename(file, path.extname(file)).toLowerCase();
+                return fileName.startsWith(normalizedPrompt + '_google_') || 
+                       fileName === normalizedPrompt + '_google';
+            });
+            
+            const results = {};
+            const promises = [];
+            
+            // Prepare shared resources
+            const relatedRobots = await findRelatedRobots(prompt);
+            let referenceImages = [];
+            if (relatedRobots.length > 0) {
+                console.log(`Using ${relatedRobots.length} related robots as primary references`);
+                referenceImages = relatedRobots.map(r => r.path);
+                if (referenceImages.length < 10) {
+                    const additionalCount = 10 - referenceImages.length;
+                    const randomRefs = await loadReferenceImages(additionalCount);
+                    referenceImages = [...referenceImages, ...randomRefs];
+                }
+            } else {
+                referenceImages = await loadReferenceImages(10);
+            }
+            
+            // Generate with OpenAI (or use cache)
+            if (openaiCached) {
+                console.log(`Found cached OpenAI image: ${openaiCached}`);
+                results.openai = {
+                    success: true,
+                    filename: openaiCached,
+                    cached: true,
+                    cost: '$0.0000'
+                };
+            } else {
+                promises.push(
+                    generateWithOpenAI(prompt, referenceImages, relatedRobots)
+                        .then(result => {
+                            const filename = `${normalizedPrompt}_openai_${Date.now()}.png`;
+                            const filepath = path.join(generatedDir, filename);
+                            return fs.writeFile(filepath, result.imageBuffer).then(() => {
+                                console.log(`OpenAI image saved as: ${filename}`);
+                                results.openai = {
+                                    success: true,
+                                    filename: filename,
+                                    cost: result.cost,
+                                    tokenUsage: result.tokenUsage
+                                };
+                            });
+                        })
+                        .catch(error => {
+                            console.error('OpenAI generation failed:', error);
+                            results.openai = {
+                                success: false,
+                                error: error.message
+                            };
+                        })
+                );
+            }
+            
+            // Generate with Google (or use cache)
+            if (googleCached) {
+                console.log(`Found cached Google image: ${googleCached}`);
+                results.google = {
+                    success: true,
+                    filename: googleCached,
+                    cached: true,
+                    cost: '$0.0000'
+                };
+            } else {
+                promises.push(
+                    generateWithGoogle(prompt, referenceImages, relatedRobots)
+                        .then(result => {
+                            const filename = `${normalizedPrompt}_google_${Date.now()}.png`;
+                            const filepath = path.join(generatedDir, filename);
+                            return fs.writeFile(filepath, result.imageBuffer).then(() => {
+                                console.log(`Google image saved as: ${filename}`);
+                                results.google = {
+                                    success: true,
+                                    filename: filename,
+                                    cost: result.cost,
+                                    tokenUsage: result.tokenUsage
+                                };
+                            });
+                        })
+                        .catch(error => {
+                            console.error('Google generation failed:', error);
+                            results.google = {
+                                success: false,
+                                error: error.message
+                            };
+                        })
+                );
+            }
+            
+            // Wait for all generations to complete
+            await Promise.all(promises);
+            
+            // Return combined results
+            res.json({
+                success: true,
+                results: results,
+                research: `Generated images for "${prompt}" using both models`
+            });
+            return;
+        }
         
         // First check if we already have this robot
         const normalizedPrompt = prompt.toLowerCase().replace(/[^a-z0-9]/gi, '_');
