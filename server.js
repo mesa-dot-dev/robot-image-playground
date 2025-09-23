@@ -562,7 +562,7 @@ async function findRelatedRobots(prompt) {
         for (const file of generatedFiles) {
             if (file.endsWith('.png') || file.endsWith('.jpg') || file.endsWith('.jpeg')) {
                 allExistingRobots.push({
-                    name: path.basename(file, path.extname(file)).replace(/_\d+$/, ''),
+                    name: path.basename(file, path.extname(file)).replace(/_\d{13}$/, ''),
                     path: path.join(generatedDir, file),
                     source: 'generated'
                 });
@@ -656,14 +656,18 @@ app.post('/api/generate', async function(req, res) {
             // Look for existing OpenAI and Google versions
             const openaiCached = generatedFiles.find(file => {
                 const fileName = path.basename(file, path.extname(file)).toLowerCase();
-                return fileName.startsWith(normalizedPrompt + '_openai_') || 
-                       fileName === normalizedPrompt + '_openai';
+                // Remove timestamp suffix if present
+                const fileNameWithoutTimestamp = fileName.replace(/_\d{13}$/, '');
+                // Check for exact match with model suffix
+                return fileNameWithoutTimestamp === normalizedPrompt + '_openai';
             });
             
             const googleCached = generatedFiles.find(file => {
                 const fileName = path.basename(file, path.extname(file)).toLowerCase();
-                return fileName.startsWith(normalizedPrompt + '_google_') || 
-                       fileName === normalizedPrompt + '_google';
+                // Remove timestamp suffix if present
+                const fileNameWithoutTimestamp = fileName.replace(/_\d{13}$/, '');
+                // Check for exact match with model suffix
+                return fileNameWithoutTimestamp === normalizedPrompt + '_google';
             });
             
             const results = {};
@@ -771,7 +775,10 @@ app.post('/api/generate', async function(req, res) {
         const generatedFiles = await fs.readdir(generatedDir);
         const existingGenerated = generatedFiles.find(file => {
             const fileName = path.basename(file, path.extname(file)).toLowerCase();
-            return fileName.startsWith(normalizedPrompt + '_') || fileName === normalizedPrompt;
+            // Remove timestamp suffix if present (e.g., "_1758663007797")
+            const fileNameWithoutTimestamp = fileName.replace(/_\d{13}$/, '');
+            // Check for exact match only (don't remove model suffixes here - those are separate images)
+            return fileNameWithoutTimestamp === normalizedPrompt;
         });
         
         if (existingGenerated) {
@@ -794,7 +801,8 @@ app.post('/api/generate', async function(req, res) {
             const fileName = path.basename(file, path.extname(file)).toLowerCase();
             const searchTerm = prompt.toLowerCase().replace(/\s+/g, '').replace(/[^a-z0-9]/gi, '');
             const fileNameClean = fileName.replace(/[^a-z0-9]/gi, '').toLowerCase();
-            return fileNameClean === searchTerm || fileName === prompt.toLowerCase();
+            // Only exact match, not substring
+            return fileNameClean === searchTerm;
         });
         
         if (existingReference) {
@@ -826,7 +834,8 @@ app.post('/api/generate', async function(req, res) {
                 const fileName = path.basename(file, path.extname(file)).toLowerCase();
                 const searchTerm = prompt.toLowerCase().replace(/\s+/g, '').replace(/[^a-z0-9]/gi, '');
                 const fileNameClean = fileName.replace(/[^a-z0-9]/gi, '').toLowerCase();
-                return fileNameClean === searchTerm || fileName === prompt.toLowerCase();
+                // Only exact match, not substring
+                return fileNameClean === searchTerm;
             });
             
             if (existingSecondaryReference) {
@@ -1011,7 +1020,7 @@ app.get('/api/gallery', async function(req, res) {
             .filter(file => /\.(png|jpg|jpeg)$/i.test(file))
             .map(filename => ({
                 filename: filename,
-                name: filename.replace(/_\d+\.(png|jpg|jpeg)$/i, '').replace(/_/g, ' ')
+                name: filename.replace(/_\d{13}\.(png|jpg|jpeg)$/i, '').replace(/_/g, ' ')
             }))
             .reverse(); // Show newest first
         
