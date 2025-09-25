@@ -38,6 +38,18 @@ async function ensureGeneratedDir() {
     }
 }
 
+// Save buffer as 128x128 JPG (quality 85) into Generated directory
+async function saveProcessedImage(imageBuffer, filenameBase) {
+    const dir = path.join(__dirname, 'Generated');
+    const filename = `${filenameBase}.jpg`;
+    const filepath = path.join(dir, filename);
+    await sharp(imageBuffer)
+        .resize(256, 256, { fit: 'cover', withoutEnlargement: true })
+        .jpeg({ quality: 95 })
+        .toFile(filepath);
+    return filename;
+}
+
 // Load reference images - now with random selection
 async function loadReferenceImages(limit = 10) {
     const refDir = path.join(__dirname, 'Reference Images');
@@ -698,9 +710,8 @@ app.post('/api/generate', async function(req, res) {
                 promises.push(
                     generateWithOpenAI(prompt, referenceImages, relatedRobots, extensiveThinking)
                         .then(result => {
-                            const filename = `${normalizedPrompt}_openai_${Date.now()}.png`;
-                            const filepath = path.join(generatedDir, filename);
-                            return fs.writeFile(filepath, result.imageBuffer).then(() => {
+                            const filenameBase = `${normalizedPrompt}_openai_${Date.now()}`;
+                            return saveProcessedImage(result.imageBuffer, filenameBase).then((filename) => {
                                 console.log(`OpenAI image saved as: ${filename}`);
                                 results.openai = {
                                     success: true,
@@ -733,9 +744,8 @@ app.post('/api/generate', async function(req, res) {
                 promises.push(
                     generateWithGoogle(prompt, referenceImages, relatedRobots, extensiveThinking)
                         .then(result => {
-                            const filename = `${normalizedPrompt}_google_${Date.now()}.png`;
-                            const filepath = path.join(generatedDir, filename);
-                            return fs.writeFile(filepath, result.imageBuffer).then(() => {
+                            const filenameBase = `${normalizedPrompt}_google_${Date.now()}`;
+                            return saveProcessedImage(result.imageBuffer, filenameBase).then((filename) => {
                                 console.log(`Google image saved as: ${filename}`);
                                 results.google = {
                                     success: true,
@@ -808,12 +818,9 @@ app.post('/api/generate', async function(req, res) {
         if (existingReference) {
             console.log(`Found existing reference robot: ${existingReference}`);
             const sourceFile = path.join(referenceDir, existingReference);
-            const filename = `${normalizedPrompt}_${Date.now()}.png`;
-            const destFile = path.join(generatedDir, filename);
-            
             const imageBuffer = await fs.readFile(sourceFile);
-            await fs.writeFile(destFile, imageBuffer);
-            
+            const filename = await saveProcessedImage(imageBuffer, `${normalizedPrompt}_${Date.now()}`);
+
             res.json({
                 success: true,
                 filename: filename,
@@ -841,12 +848,9 @@ app.post('/api/generate', async function(req, res) {
             if (existingSecondaryReference) {
                 console.log(`Found existing secondary reference robot: ${existingSecondaryReference}`);
                 const sourceFile = path.join(secondaryReferenceDir, existingSecondaryReference);
-                const filename = `${normalizedPrompt}_${Date.now()}.png`;
-                const destFile = path.join(generatedDir, filename);
-                
                 const imageBuffer = await fs.readFile(sourceFile);
-                await fs.writeFile(destFile, imageBuffer);
-                
+                const filename = await saveProcessedImage(imageBuffer, `${normalizedPrompt}_${Date.now()}`);
+
                 res.json({
                     success: true,
                     filename: filename,
@@ -898,11 +902,8 @@ app.post('/api/generate', async function(req, res) {
             result = await generateWithOpenAI(prompt, referenceImages, relatedRobots, extensiveThinking);
         }
         
-        // Save the image
-        const filename = `${normalizedPrompt}_${Date.now()}.png`;
-        const filepath = path.join(__dirname, 'Generated', filename);
-        
-        await fs.writeFile(filepath, result.imageBuffer);
+        // Save the image as 128x128 JPG
+        const filename = await saveProcessedImage(result.imageBuffer, `${normalizedPrompt}_${Date.now()}`);
         console.log(`Image saved as: ${filename}`);
         
         // Calculate generation time
