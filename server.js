@@ -38,14 +38,14 @@ async function ensureGeneratedDir() {
     }
 }
 
-// Save buffer as 128x128 JPG (quality 85) into Generated directory
+// Save buffer as 256x256 JPG (quality 90) into Generated directory
 async function saveProcessedImage(imageBuffer, filenameBase) {
     const dir = path.join(__dirname, 'Generated');
     const filename = `${filenameBase}.jpg`;
     const filepath = path.join(dir, filename);
     await sharp(imageBuffer)
         .resize(256, 256, { fit: 'cover', withoutEnlargement: true })
-        .jpeg({ quality: 95 })
+        .jpeg({ quality: 90 })
         .toFile(filepath);
     return filename;
 }
